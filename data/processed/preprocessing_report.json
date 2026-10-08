@@ -1,0 +1,249 @@
+{
+  "analysis_period": {
+    "start": "2007-01-01",
+    "end": "2026-07-01",
+    "months": 235
+  },
+  "datasets": {
+    "bus": {
+      "source_file": "汽車客運概況.csv",
+      "sha256": "0c0c0fe1ff4e902452597f85f48462a0aae223125ebc2b39a4e9bfac2ddb9b88",
+      "source_monthly_rows": 427,
+      "exact_duplicates_removed": 0,
+      "missing_months": [],
+      "excluded_record_count": 41,
+      "source_notes": [
+        "說明：\n1.市區客運98年(含)以前臺北市之營業行車次數以「段次」計算，為與全國資料計算基礎一致，99年起改以\n   「班次」統計。\n2.100年起市區客運行駛延日車數、客運人數及平均每日人數，均含客運業者經縣市政府核定區域內行駛\n   路線、市區客運業出租業務及鄉、鎮、市、區公所等自購營業客車之營運資料，惟113年9月起，地方政府\n   已依汽車運輸業管理規則將鄉鎮市區公所自購營業客車轉為業管路線，爰自有車輛相關資料併入路線客運\n   之統計範圍。\n3.99年(含)以前本表資料範圍不包括金門縣及連江縣。\n4.100年起期末營業里程係以不重複路線統計為原則，即若多家客運公司經營同一路線，則僅列計一條路線\n   里程。\n5.消耗油量及行駛延日車數分別自民國81年及90年起開始統計。\n6.依109年11月汽車運輸業管理規則第44條之2、3等增訂規定，市區汽車客運之偏遠路線，得由計程車客運\n   業、當地社會團體或個人成立之市區汽車客運業經營；由地方政府自行經營市區汽車客運業者，其經營得\n   徵求當地社會團體、個人協助。\n7.公路客運含國道客運及一般公路客運。\n8.100年起公路汽車客運人數含客運業者出租業務運量。\n9.公路客運概況資料於115年5月進行114年1-12月資料釐正作業。",
+        "資料來源：\n1.市區客運：98年前為監理單位；99年起由各縣市政府提供。\n2.公路客運：公路局。",
+        "最近一次資料更新時間：115年09月29日"
+      ],
+      "columns": {
+        "bus_total_route_km": "汽車客運期末營業里程(公里)",
+        "bus_total_vehicles": "汽車客運期末營業車輛(輛)",
+        "bus_total_trips": "汽車客運營業行車次數(班次)",
+        "bus_total_vehicle_km": "汽車客運營業行駛里程(車公里)",
+        "bus_total_passengers": "汽車客運客運人數(人次)",
+        "bus_total_passenger_km": "汽車客運延人公里(人公里)",
+        "bus_total_revenue_twd": "汽車客運客運收入(新臺幣元)",
+        "bus_city_route_km": "市區客運期末營業里程(公里)",
+        "bus_city_vehicles": "市區客運期末營業車輛(輛)",
+        "bus_city_trips": "市區客運營業行車次數(班次)",
+        "bus_city_vehicle_km": "市區客運營業行駛里程(車公里)",
+        "bus_city_vehicle_days": "市區客運行駛延日車數(日輛)",
+        "bus_city_fuel_liters": "市區客運消耗油量(公升)",
+        "bus_city_passengers": "市區客運客運人數(人次)",
+        "bus_city_daily_passengers": "市區客運平均每日人數(人次)",
+        "bus_city_passenger_km": "市區客運延人公里(人公里)",
+        "bus_city_revenue_twd": "市區客運客運收入(新臺幣元)",
+        "bus_highway_route_km": "公路客運期末營業里程(公里)",
+        "bus_highway_vehicles": "公路客運期末營業車輛(輛)",
+        "bus_highway_trips": "公路客運營業行車次數(班次)",
+        "bus_highway_vehicle_km": "公路客運營業行駛里程(車公里)",
+        "bus_highway_passengers": "公路客運客運人數(人次)",
+        "bus_highway_passenger_km": "公路客運延人公里(人公里)",
+        "bus_highway_revenue_twd": "公路客運客運收入(新臺幣元)"
+      },
+      "source_start": "1991-01-01",
+      "source_end": "2026-07-01",
+      "rows": 235,
+      "start": "2007-01-01",
+      "end": "2026-07-01",
+      "missing_cells": 0,
+      "flagged_cells": 1689,
+      "imputed_zero_cells": 0,
+      "remaining_missing_cells": 0
+    },
+    "hsr_service": {
+      "source_file": "高速鐵路行駛次數及行駛公里.csv",
+      "sha256": "8bab16d6c406d9bb02cd859eeab1129dc946ffbf305285708a821ed1bc607b40",
+      "source_monthly_rows": 236,
+      "exact_duplicates_removed": 0,
+      "missing_months": [],
+      "excluded_record_count": 25,
+      "source_notes": [
+        "說明：高速鐵路自96年1月5日開始營運。",
+        "資料來源：交通部鐵道局。",
+        "最近一次資料更新時間：115年09月29日"
+      ],
+      "columns": {
+        "hsr_trips": "列車行駛次數(次)",
+        "hsr_train_km": "列車行駛公里(公里)"
+      },
+      "source_start": "2007-01-01",
+      "source_end": "2026-08-01",
+      "rows": 235,
+      "start": "2007-01-01",
+      "end": "2026-07-01",
+      "missing_cells": 0,
+      "flagged_cells": 119,
+      "imputed_zero_cells": 0,
+      "remaining_missing_cells": 0
+    },
+    "hsr_usage": {
+      "source_file": "高速鐵路客運概況.csv",
+      "sha256": "446a84c850696fb1c6edf7719836f7f8ab9b5227cd36f1bfb346e34f9ddb5474",
+      "source_monthly_rows": 236,
+      "exact_duplicates_removed": 0,
+      "missing_months": [],
+      "excluded_record_count": 25,
+      "source_notes": [
+        "說明：\n  1.高速鐵路自96年1月5日開始營運。\n  2.列車準點率96年以列車抵達終點站時間與時刻表訂時間差距未滿10分鐘計算，97年起以未滿5分鐘為準。",
+        "資料來源：交通部鐵道局。",
+        "最近一次資料更新時間：115年09月29日"
+      ],
+      "columns": {
+        "hsr_passengers": "旅客人數(人次)",
+        "hsr_daily_passengers": "平均每日人數(人次)",
+        "hsr_passenger_km": "延人公里(人公里)",
+        "hsr_avg_trip_km": "平均每一旅客運距(公里)",
+        "hsr_occupancy_pct": "客座利用率(%)",
+        "hsr_punctuality_pct": "列車準點率(%)"
+      },
+      "source_start": "2007-01-01",
+      "source_end": "2026-08-01",
+      "rows": 235,
+      "start": "2007-01-01",
+      "end": "2026-07-01",
+      "missing_cells": 0,
+      "flagged_cells": 323,
+      "imputed_zero_cells": 0,
+      "remaining_missing_cells": 0
+    },
+    "hsr_stations": {
+      "source_file": "高速鐵路旅客人數─按進出站分.csv",
+      "sha256": "57b58d52c83f7f1e821850029231a628fec6bc1854f10c2403b8d1947af722a0",
+      "source_monthly_rows": 236,
+      "exact_duplicates_removed": 0,
+      "missing_months": [],
+      "excluded_record_count": 27,
+      "source_notes": [
+        "單位：人次",
+        "說明：\n  1.高速鐵路自96年1月5日開始營運。\n  2.臺北站自96年3月2日開始通車。\n  3.苗栗站、彰化站及雲林站自104年12月1日開始通車。\n  4.南港站自105年7月1日開始通車。",
+        "資料來源：交通部鐵道局。",
+        "最近一次資料更新時間：115年09月29日"
+      ],
+      "columns": {
+        "hsr_entry_total": "進站_總計",
+        "hsr_entry_nangang": "進站_南港",
+        "hsr_entry_taipei": "進站_臺北",
+        "hsr_entry_banqiao": "進站_板橋",
+        "hsr_entry_taoyuan": "進站_桃園",
+        "hsr_entry_hsinchu": "進站_新竹",
+        "hsr_entry_miaoli": "進站_苗栗",
+        "hsr_entry_taichung": "進站_臺中",
+        "hsr_entry_changhua": "進站_彰化",
+        "hsr_entry_yunlin": "進站_雲林",
+        "hsr_entry_chiayi": "進站_嘉義",
+        "hsr_entry_tainan": "進站_臺南",
+        "hsr_entry_zuoying": "進站_左營",
+        "hsr_exit_total": "出站_總計",
+        "hsr_exit_nangang": "出站_南港",
+        "hsr_exit_taipei": "出站_臺北",
+        "hsr_exit_banqiao": "出站_板橋",
+        "hsr_exit_taoyuan": "出站_桃園",
+        "hsr_exit_hsinchu": "出站_新竹",
+        "hsr_exit_miaoli": "出站_苗栗",
+        "hsr_exit_taichung": "出站_臺中",
+        "hsr_exit_changhua": "出站_彰化",
+        "hsr_exit_yunlin": "出站_雲林",
+        "hsr_exit_chiayi": "出站_嘉義",
+        "hsr_exit_tainan": "出站_臺南",
+        "hsr_exit_zuoying": "出站_左營"
+      },
+      "source_start": "2007-01-01",
+      "source_end": "2026-08-01",
+      "rows": 235,
+      "start": "2007-01-01",
+      "end": "2026-07-01",
+      "missing_cells": 874,
+      "flagged_cells": 1159,
+      "imputed_zero_cells": 874,
+      "remaining_missing_cells": 0
+    }
+  },
+  "merged": {
+    "rows": 235,
+    "target": "hsr_passengers",
+    "join": "left joins on HSR usage months",
+    "scaled": false
+  },
+  "missing_policy": "Fill only station_not_open missing cells with zero. Preserve other missing values. missing_cells, missing_values.csv and _is_missing indicators describe pre-imputation missingness.",
+  "outlier_policy": "Flag only. Same calendar month, previous five years, at least three valid observations; 1.5 IQR. Zero IQR is skipped.",
+  "scaling_policy": "Deferred. Call fit_scaler on training features, then scale_features using those parameters.",
+  "consistency_checks": [
+    {
+      "check": "entry_station_sum",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "entry_total_vs_usage",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "exit_station_sum",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "exit_total_vs_usage",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "bus_total_route_km_vs_city_plus_highway",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "bus_total_vehicles_vs_city_plus_highway",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "bus_total_trips_vs_city_plus_highway",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "bus_total_vehicle_km_vs_city_plus_highway",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "bus_total_passengers_vs_city_plus_highway",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "bus_total_passenger_km_vs_city_plus_highway",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    },
+    {
+      "check": "bus_total_revenue_twd_vs_city_plus_highway",
+      "checked_months": 235,
+      "unchecked_months": 0,
+      "mismatches": []
+    }
+  ],
+  "definition_changes": [
+    "HSR started on 2007-01-05; the first operating month is partial.",
+    "Taipei opened on 2007-03-02; March 2007 is partial.",
+    "HSR punctuality threshold changed from <10 minutes in 2007 to <5 minutes in 2008.",
+    "Bus trip-count definitions and city data provider changed in 2010.",
+    "Bus route distance, geographic coverage and passenger coverage changed in 2011.",
+    "City bus coverage changed in September 2024; see source notes."
+  ]
+}
