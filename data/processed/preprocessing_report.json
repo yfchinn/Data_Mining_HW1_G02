@@ -1,8 +1,8 @@
 {
   "analysis_period": {
     "start": "2007-01-01",
-    "end": "2026-07-01",
-    "months": 235
+    "end": "2026-06-01",
+    "months": 234
   },
   "datasets": {
     "bus": {
@@ -45,11 +45,11 @@
       },
       "source_start": "1991-01-01",
       "source_end": "2026-07-01",
-      "rows": 235,
+      "rows": 234,
       "start": "2007-01-01",
-      "end": "2026-07-01",
+      "end": "2026-06-01",
       "missing_cells": 0,
-      "flagged_cells": 1689,
+      "flagged_cells": 1685,
       "imputed_zero_cells": 0,
       "remaining_missing_cells": 0
     },
@@ -71,11 +71,11 @@
       },
       "source_start": "2007-01-01",
       "source_end": "2026-08-01",
-      "rows": 235,
+      "rows": 234,
       "start": "2007-01-01",
-      "end": "2026-07-01",
+      "end": "2026-06-01",
       "missing_cells": 0,
-      "flagged_cells": 119,
+      "flagged_cells": 117,
       "imputed_zero_cells": 0,
       "remaining_missing_cells": 0
     },
@@ -101,11 +101,11 @@
       },
       "source_start": "2007-01-01",
       "source_end": "2026-08-01",
-      "rows": 235,
+      "rows": 234,
       "start": "2007-01-01",
-      "end": "2026-07-01",
+      "end": "2026-06-01",
       "missing_cells": 0,
-      "flagged_cells": 323,
+      "flagged_cells": 322,
       "imputed_zero_cells": 0,
       "remaining_missing_cells": 0
     },
@@ -152,88 +152,143 @@
       },
       "source_start": "2007-01-01",
       "source_end": "2026-08-01",
-      "rows": 235,
+      "rows": 234,
       "start": "2007-01-01",
-      "end": "2026-07-01",
+      "end": "2026-06-01",
       "missing_cells": 874,
       "flagged_cells": 1159,
       "imputed_zero_cells": 874,
       "remaining_missing_cells": 0
+    },
+    "gdp": {
+      "encoding": "utf-8-sig",
+      "source_frequency": "quarterly",
+      "columns": {
+        "gdp_per_capita_nominal_twd": "平均每人GDP(名目值，元)"
+      },
+      "excluded_record_count": 5,
+      "source_notes": [
+        "註解：",
+        "2026Q1為修正數，2026Q2為初步統計數。"
+      ],
+      "monthly_alignment": "Repeat the quarterly value in each of its three months; no division or interpolation.",
+      "forecast_usage": "Historical analysis only until forecast features are defined. Publication dates and historical vintages are not available in this source. Do not use realized future GDP as a known forecast input.",
+      "source_file": "平均每人GDP(元).csv",
+      "sha256": "ab4d8c70da1bdf80c1f4e1c44ba8bf5a459b95369ab24ce97722d2ffe1dd7439",
+      "source_quarterly_rows": 78,
+      "exact_duplicates_removed": 0,
+      "missing_months": [],
+      "source_start": "2007-01-01",
+      "source_end": "2026-06-01",
+      "rows": 234,
+      "start": "2007-01-01",
+      "end": "2026-06-01",
+      "missing_cells": 0,
+      "flagged_cells": 87,
+      "imputed_zero_cells": 0,
+      "remaining_missing_cells": 0
+    },
+    "holidays": {
+      "encoding": "utf-8-sig",
+      "source_frequency": "monthly",
+      "columns": {
+        "long_holiday_count": "long_holiday_count"
+      },
+      "excluded_record_count": 0,
+      "source_notes": [
+        "連假的開始與結束各計 1；跨月時分別計入所在月份。同月頭尾合計 2，保留來源原值，不除以 2；0 為有效計數。"
+      ],
+      "source_file": "連假次數-頭尾各計1.csv",
+      "sha256": "6367f4215a78023653100a8d293543b51d713c71ac9a74802795ec50613b2e7e",
+      "source_monthly_rows": 235,
+      "exact_duplicates_removed": 0,
+      "missing_months": [],
+      "source_start": "2007-01-01",
+      "source_end": "2026-07-01",
+      "rows": 234,
+      "start": "2007-01-01",
+      "end": "2026-06-01",
+      "missing_cells": 0,
+      "flagged_cells": 0,
+      "imputed_zero_cells": 0,
+      "remaining_missing_cells": 0
     }
   },
   "merged": {
-    "rows": 235,
+    "rows": 234,
     "target": "hsr_passengers",
     "join": "left joins on HSR usage months",
     "scaled": false
   },
   "missing_policy": "Fill only station_not_open missing cells with zero. Preserve other missing values. missing_cells, missing_values.csv and _is_missing indicators describe pre-imputation missingness.",
-  "outlier_policy": "Flag only. Same calendar month, previous five years, at least three valid observations; 1.5 IQR. Zero IQR is skipped.",
+  "outlier_policy": "Flag only. Same calendar month, previous five years, at least three valid observations; 1.5 IQR. Zero IQR is skipped. Holiday counts are checked for finite nonnegative integers only, without statistical outlier flags.",
+  "gdp_policy": "Repeat the quarterly value in each of its three months; no division or interpolation.",
+  "forecast_policy": "Historical analysis only until forecast features are defined. Publication dates and historical vintages are not available in this source. Do not use realized future GDP as a known forecast input.",
   "scaling_policy": "Deferred. Call fit_scaler on training features, then scale_features using those parameters.",
   "consistency_checks": [
     {
       "check": "entry_station_sum",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "entry_total_vs_usage",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "exit_station_sum",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "exit_total_vs_usage",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "bus_total_route_km_vs_city_plus_highway",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "bus_total_vehicles_vs_city_plus_highway",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "bus_total_trips_vs_city_plus_highway",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "bus_total_vehicle_km_vs_city_plus_highway",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "bus_total_passengers_vs_city_plus_highway",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "bus_total_passenger_km_vs_city_plus_highway",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     },
     {
       "check": "bus_total_revenue_twd_vs_city_plus_highway",
-      "checked_months": 235,
+      "checked_months": 234,
       "unchecked_months": 0,
       "mismatches": []
     }

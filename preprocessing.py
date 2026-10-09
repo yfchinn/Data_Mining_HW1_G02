@@ -2,8 +2,12 @@
 執行python preprocessing.py，即可在 data/processed/ 取得處理後的資料，原始 CSV 不會被修改。
 亦可直接讀取使用 data/processed/merged_monthly.csv。
 hsr_passengers 是該月份的旅客人數，可作為預測目標。
-所有資料統一使用 2007 年 1 月至 2026 年 7 月（含首尾），共 235 個月。
+所有資料統一使用 2007 年 1 月至 2026 年 6 月（含首尾），共 234 個月。
 日期以西元每月第一天表示整個月份。
+
+gdp_per_capita_nominal_twd 為季度平均每人 GDP，同季三個月重複原值，不除以 3。
+如果以截至 2024 年的資訊預測 2025 年，不可直接輸入 2025 年實際 GDP。
+long_holiday_count 為連假開始與結束各計 1，跨月分別計入所在月份。
 
 將車站尚未啟用的缺值填為 0。
 月份週期用 sin/cos 做encoding。
@@ -56,7 +60,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 ANALYSIS_START = "2007-01-01"
-ANALYSIS_END = "2026-07-01"
+ANALYSIS_END = "2026-06-01"
 MONTH_PATTERN = re.compile(r"^(\d{3})年(\d{2})月$")
 MISSING_TOKENS = {"", "-", "--", "NA", "N/A", "NaN", "null"}
 STATIONS = ["total", "nangang", "taipei", "banqiao", "taoyuan", "hsinchu",
@@ -78,6 +82,12 @@ DATASETS = {
     "hsr_stations": ("高速鐵路旅客人數─按進出站分.csv",
                      [f"hsr_{direction}_{station}" for direction in ["entry", "exit"]
                       for station in STATIONS]),
+    "gdp": ("平均每人GDP(元).csv", ["gdp_per_capita_nominal_twd"]),
+    "holidays": ("連假次數-頭尾各計1.csv", ["long_holiday_count"]),
+}
+FEATURE_DEFINITIONS = {
+    "gdp_per_capita_nominal_twd": "季度平均每人 GDP（名目值，元）；同季三個月使用相同原值，不除以 3，非月 GDP。供歷史分析；預測特徵須另依預測時點可得的公布資料與版本建立。",
+    "long_holiday_count": "連假的開始與結束各計 1；跨月時分別計入所在月份。同月頭尾合計 2，保留來源原值，不除以 2；0 為有效計數。",
 }
 FLAG_COLUMNS = ["dataset", "date", "column", "value", "reason", "lower_bound", "upper_bound"]
 
@@ -145,6 +155,99 @@ def read_monthly(path: Path, columns: list[str]) -> tuple[pd.DataFrame, dict]:
     return frame, metadata
 
 
+def _external_monthly(path: Path, records: list, column: str, metadata: dict,
+                      quarterly: bool = False) -> tuple[pd.DataFrame, dict]:
+    """Validate source keys before expanding quarters; never fill missing quarters."""
+    frame = pd.DataFrame(records, columns=["date", column])
+    if frame.empty:
+        raise ValueError(f"No data records in {path.name}")
+    original_count = len(frame)
+    frame = frame.drop_duplicates()
+    if frame["date"].duplicated().any():
+        raise ValueError(f"Conflicting duplicate periods in {path.name}")
+    duplicate_count = original_count - len(frame)
+    frame = frame.set_index("date").sort_index()
+    if quarterly:
+        frame = pd.concat([
+            frame.set_axis(frame.index + pd.DateOffset(months=offset))
+            for offset in range(3)
+        ]).sort_index()
+    complete_index = pd.date_range(frame.index.min(), frame.index.max(), freq="MS", name="date")
+    metadata.update({
+        "source_file": path.name,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "source_quarterly_rows" if quarterly else "source_monthly_rows": original_count,
+        "exact_duplicates_removed": duplicate_count,
+        "missing_months": [d.strftime("%Y-%m-%d") for d in complete_index.difference(frame.index)],
+    })
+    return frame.reindex(complete_index), metadata
+
+
+def read_gdp(path: Path, columns: list[str]) -> tuple[pd.DataFrame, dict]:
+    encoding = "utf-8-sig"
+    try:
+        with path.open(encoding=encoding, newline="") as handle:
+            rows = list(csv.reader(handle))
+    except UnicodeDecodeError:
+        # Accept the original Big5 export as well as the UTF-8 workspace copy.
+        encoding = "cp950"
+        with path.open(encoding=encoding, newline="") as handle:
+            rows = list(csv.reader(handle))
+    header = ["統計期", "平均每人GDP(名目值，元)"]
+    if not any(row[:2] == header for row in rows):
+        raise ValueError(f"Unexpected GDP header in {path.name}")
+    records, excluded = [], []
+    for row in rows:
+        if not row:
+            continue
+        label = row[0].strip()
+        match = re.fullmatch(r"(\d{2,3})年第([1-4])季", label)
+        if not match:
+            if re.match(r"\d+年", label):
+                raise ValueError(f"Invalid GDP quarter: {label}")
+            excluded.append(label)
+            continue
+        if len(row) not in (2, 3) or (len(row) == 3 and row[2].strip()):
+            raise ValueError(f"Unexpected GDP row structure: {label}")
+        token = row[1].strip()
+        value = np.nan if token in MISSING_TOKENS else float(token.replace(",", ""))
+        date = pd.Timestamp(int(match[1]) + 1911, (int(match[2]) - 1) * 3 + 1, 1)
+        records.append([date, value])
+    return _external_monthly(path, records, columns[0], {
+        "encoding": encoding, "source_frequency": "quarterly",
+        "columns": {columns[0]: header[1]},
+        "excluded_record_count": len(excluded),
+        "source_notes": [label for label in excluded if label and label != header[0]],
+        "monthly_alignment": "Repeat the quarterly value in each of its three months; no division or interpolation.",
+        "forecast_usage": "Historical analysis only until forecast features are defined. Publication dates and historical vintages are not available in this source. Do not use realized future GDP as a known forecast input.",
+    }, quarterly=True)
+
+
+def read_holidays(path: Path, columns: list[str]) -> tuple[pd.DataFrame, dict]:
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        if reader.fieldnames != ["year", "month", "long_holiday_count"]:
+            raise ValueError(f"Unexpected holiday header in {path.name}")
+        records = []
+        for row in reader:
+            if None in row or any(value is None for value in row.values()):
+                raise ValueError(f"Unexpected holiday row structure in {path.name}")
+            date = pd.Timestamp(int(row["year"]), int(row["month"]), 1)
+            token = row["long_holiday_count"].strip()
+            value = np.nan if token in MISSING_TOKENS else float(token)
+            records.append([date, value])
+    return _external_monthly(path, records, columns[0], {
+        "encoding": "utf-8-sig", "source_frequency": "monthly",
+        "columns": {columns[0]: "long_holiday_count"},
+        "excluded_record_count": 0, "source_notes": [FEATURE_DEFINITIONS[columns[0]]],
+    })
+
+
+def read_dataset(name: str, path: Path, columns: list[str]) -> tuple[pd.DataFrame, dict]:
+    reader = {"gdp": read_gdp, "holidays": read_holidays}.get(name, read_monthly)
+    return reader(path, columns)
+
+
 def missing_reason(column: str, date: pd.Timestamp, missing_months: set[str]) -> str:
     if date.strftime("%Y-%m-%d") in missing_months:
         return "missing_month"
@@ -172,10 +275,14 @@ def inspect_quality(name: str, frame: pd.DataFrame, metadata: dict) -> tuple[lis
         invalid = series.notna() & (~finite | (series < 0))
         if column.endswith("_pct"):
             invalid |= series > 100
+        if column == "long_holiday_count":
+            invalid |= finite & series.where(finite).mod(1).ne(0)
         for date in series.index[invalid]:
             flags.append({"dataset": name, "date": date, "column": column,
                           "value": series.loc[date], "reason": "invalid_range",
                           "lower_bound": 0, "upper_bound": 100 if column.endswith("_pct") else None})
+        if column == "long_holiday_count":
+            continue  # Calendar counts are validated, not statistical outliers.
         valid = series.where(~invalid)
         grouped = valid.groupby(valid.index.month)
         q1 = grouped.transform(lambda s: s.shift(1).rolling(5, min_periods=3).quantile(0.25))
@@ -342,7 +449,7 @@ def run(input_dir: Path, output_dir: Path) -> dict:
         raise ValueError("Output directory must differ from the raw data directory")
     tables, summaries, all_missing, all_flags = {}, {}, [], []
     for name, (filename, columns) in DATASETS.items():
-        frame, metadata = read_monthly(input_dir / filename, columns)
+        frame, metadata = read_dataset(name, input_dir / filename, columns)
         analysis_index = pd.date_range(ANALYSIS_START, ANALYSIS_END, freq="MS", name="date")
         if analysis_index.min() < frame.index.min() or analysis_index.max() > frame.index.max():
             raise ValueError(f"{name} does not cover the required analysis period")
@@ -367,7 +474,9 @@ def run(input_dir: Path, output_dir: Path) -> dict:
     merged = tables["hsr_usage"].join(tables["hsr_service"], how="left", validate="one_to_one")
     merged = merged.join(tables["hsr_stations"], how="left", validate="one_to_one")
     merged = merged.join(tables["bus"], how="left", validate="one_to_one")
-    for name in ["hsr_service", "hsr_stations", "bus"]:
+    merged = merged.join(tables["gdp"], how="left", validate="one_to_one")
+    merged = merged.join(tables["holidays"], how="left", validate="one_to_one")
+    for name in ["hsr_service", "hsr_stations", "bus", "gdp", "holidays"]:
         absent = merged.index.difference(tables[name].index)
         for date in absent:
             reason = "outside_source_coverage"
@@ -384,7 +493,9 @@ def run(input_dir: Path, output_dir: Path) -> dict:
         "merged": {"rows": len(merged), "target": "hsr_passengers",
                    "join": "left joins on HSR usage months", "scaled": False},
         "missing_policy": "Fill only station_not_open missing cells with zero. Preserve other missing values. missing_cells, missing_values.csv and _is_missing indicators describe pre-imputation missingness.",
-        "outlier_policy": "Flag only. Same calendar month, previous five years, at least three valid observations; 1.5 IQR. Zero IQR is skipped.",
+        "outlier_policy": "Flag only. Same calendar month, previous five years, at least three valid observations; 1.5 IQR. Zero IQR is skipped. Holiday counts are checked for finite nonnegative integers only, without statistical outlier flags.",
+        "gdp_policy": summaries["gdp"]["monthly_alignment"],
+        "forecast_policy": summaries["gdp"]["forecast_usage"],
         "scaling_policy": "Deferred. Call fit_scaler on training features, then scale_features using those parameters.",
         "consistency_checks": check_consistency(tables),
         "definition_changes": [
@@ -407,7 +518,8 @@ def run(input_dir: Path, output_dir: Path) -> dict:
     save_csv(pd.DataFrame(all_missing, columns=["dataset", "date", "column", "reason"]),
              output_dir / "missing_values.csv", index=False)
     save_csv(pd.DataFrame(all_flags, columns=FLAG_COLUMNS), output_dir / "quality_flags.csv", index=False)
-    dictionary = [{"dataset": name, "column": column, "source_label": label}
+    dictionary = [{"dataset": name, "column": column, "source_label": label,
+                   "definition": FEATURE_DEFINITIONS.get(column, "")}
                   for name, metadata in summaries.items() for column, label in metadata["columns"].items()]
     save_csv(pd.DataFrame(dictionary), output_dir / "data_dictionary.csv", index=False)
     (output_dir / "preprocessing_report.json").write_text(
