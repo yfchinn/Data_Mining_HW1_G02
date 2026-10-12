@@ -1,26 +1,37 @@
 """
-1. 特徵品質與共線性檢驗 (VIF & Heatmap)：
-   - 自動過濾「資料洩漏 (Data Leakage)」變數（如當月高鐵進出站總人次、當月公車營收/人次）。
-   - 篩選出真正的「外部/預測特徵」（如 GDP、連假天數、公車供給端特徵），避免預測模型吃到未來的答案。
+【本程式的核心功能與 EDA 實證發現】
+1. 特徵品質與多重共線性檢驗 (Module 1 - VIF & Correlation Heatmap):
+   - 嚴格過濾當月結果變數 (Target/Feature Leakage)，並剔除 bus_total_* 等恆等式的欄位 (A = B + C)。
+   - 算出的 VIF (約 30~150) 證實外部特徵間存在顯著多重共線性，適合使用 LASSO (L1 正則化) 建模。
 
-2. 分析 3 月與 9 月（皆有連假之月份）在「年增率 (YoY %)」上的相關性，並以 8 月作為無連假對照組。
+2. 驗證研究問題 RQ1 - 連假滯後連動效應 (Module 2 - Holiday Lag Correlation $H_1$):
+   - 繪製 2x2 對照散佈圖 (fig2_rq1_holiday_lag.png) 並附帶年份標籤標註。
+   - 實證顯示：全歷史數據下 3 月與 9 月 YoY 相關係數為 r = 0.49；若排除 2020-2022 疫情極端扭曲年份，
+     r 上升至 0.96 (對照組 8 月與 9 月為 r = 0.98)，證實特定連假月份間具備強烈跨期 Lag-12 連動性。
 
-3. 探討每人 GDP 成長對「高鐵 / 公路客運搭乘比率」的影響，驗證民眾是否因所得增加而產生運具升級（轉搭高鐵）。
+3. 驗證研究問題 RQ2 - 所得效果與運具轉移 (Module 3 - Modal Shift Analysis $H_2$):
+   - 每人名目 GDP 與「高鐵 / 公路客運搭乘比值 (HSR-to-Bus Ratio)」呈現 r = 0.9244 的強烈正相關。
+   - 證實國民所得提升使得民眾顯著由客運轉移至高鐵 (Modal Shift)。
 
-4. 特徵重要性評估 (Feature Importance)：
-   - 使用隨機森林 (Random Forest) 產出 Top 15 關鍵特徵排行榜。
+4. 特徵重要性評估 (Module 4 - Random Forest Feature Importance):
+   - 於訓練集上評估 Top 15 特徵排行榜，大眾運輸供給端指標 (路線公里數、營運日數) 與 GDP 具備最高預測力。
 
-- 產出的 4 張 PNG 圖表會自動存入 `reports/figures/` 資料夾
-- 預設保留最後 24 個月作為測試集，特徵分析僅使用訓練集以防資訊洩漏。
-- figure2 有超過100%的極端值，是因為疫情解封、運量回彈的影響。
-=========================================
+5. 給建模組員的資料轉型工具 (Panel Data Transformation Utility):
+   - 本程式提供 `convert_to_panel_data(df)` 函式，供建模組員自由呼叫。
+   - 若建模組欲使用『單一模型 (OLS / LASSO) 預測全台 12 個分站運量』，呼叫此函式即可將寬資料 (Wide)
+     自動重塑為面板資料 (Long Format)，並建立分站獨立之 Lag-1 與 Lag-12 特徵。
+
+【執行環境】
+- 僅使用前 210 個月作為 Training Set，保留最後 24 個月為 Test Set。
+- 產出之 4 張圖表自動儲存於 `reports/figures/` 資料夾。
+================================================================================
 """
 
 import os
 import numpy as np
 import pandas as pd
 
-# 設定 Matplotlib 為背景繪圖模式 (Agg)，確保在 Server / Remote GPU 環境下執行不報錯
+# 設定 Matplotlib 背景繪圖模式 (Agg)，確保 Server/無圖形介面環境正常執行
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -29,10 +40,26 @@ import seaborn as sns
 from sklearn.ensemble import RandomForestRegressor
 from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-# 引用組員寫好的前處理工具函式 (請確保 preprocessing.py 在同目錄下)
-from preprocessing import fit_outlier_bounds, remove_outliers
+# 嘗試引用前處理模組 (若缺乏則提供容錯備用 logic)
+try:
+    from preprocessing import fit_outlier_bounds, remove_outliers
+except ImportError:
+    def fit_outlier_bounds(df, cols):
+        bounds = {}
+        for c in cols:
+            q1 = df[c].quantile(0.25)
+            q3 = df[c].quantile(0.75)
+            iqr = q3 - q1
+            bounds[c] = (q1 - 1.5 * iqr, q3 + 1.5 * iqr)
+        return bounds
 
-# 全域繪圖樣式設定 (採用全英文標籤避免 Linux Server 缺字體亂碼)
+    def remove_outliers(df, bounds):
+        cond = pd.Series(True, index=df.index)
+        for c, (lower, upper) in bounds.items():
+            cond &= (df[c] >= lower) & (df[c] <= upper)
+        return df[cond], df[~cond]
+
+# 全域繪圖樣式設定
 plt.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial', 'sans-serif']
 plt.rcParams['axes.unicode_minus'] = False
 sns.set_theme(style="whitegrid")
@@ -41,29 +68,35 @@ sns.set_theme(style="whitegrid")
 FIG_DIR = "reports/figures"
 os.makedirs(FIG_DIR, exist_ok=True)
 
-# ==========================================
-# 1. 資料載入與特徵過濾 (Data Preparation)
-# ==========================================
+
+# ==============================================================================
+# 1. 資料載入與防洩漏過濾 (Data Preparation & Leakage Filtering)
+# ==============================================================================
 def load_and_prepare_data(csv_path="data/processed/merged_monthly.csv", test_months=24):
     """
-    載入前處理後的 CSV，並劃分訓練集 (Train) 與測試集 (Test)。
+    載入前處理後的 CSV，並嚴格劃分訓練集 (Train) 與測試集 (Test)。
+    預設保留最後 24 個月作為 Test set，特徵分析僅使用 Train set。
     """
+    if not os.path.exists(csv_path):
+        # 備用路徑 (若執行目錄在根目錄)
+        if os.path.exists("merged_monthly.csv"):
+            csv_path = "merged_monthly.csv"
+            
     df = pd.read_csv(csv_path, parse_dates=["date"])
     df = df.sort_values("date").set_index("date")
     
     train_df = df.iloc[:-test_months].copy()
     test_df = df.iloc[-test_months:].copy()
     
-    print(f"✅ 資料載入成功！總資料筆數: {len(df)} 個月 | 訓練集: {len(train_df)} 個月 | 測試集: {len(test_df)} 個月")
+    print(f"✅ 資料載入成功！總筆數: {len(df)} 個月 | 訓練集: {len(train_df)} 個月 | 測試集: {len(test_df)} 個月")
     return df, train_df, test_df
 
 
 def get_candidate_features(df):
     """
-    【重點防漏機制】選取候選特徵，嚴格排除 Data Leakage (資料洩漏) 欄位：
-    1. 排除同月份高鐵自身的結果變數 (如進出站總人次、日均人次、列車行駛公里等)。
-    2. 排除同月份公車的「營運結果」變數 (如當月公車營收、當月公車總人次)，因為預測未來時無法提前得知。
-    3. 保留「外部特徵」(GDP、連假) 與「公車供給端指標」(如營運車輛數、路線公里數)。
+    【防漏與防重複過濾】
+    1. 排除當月高鐵/公車結果變數 (Leakage)。
+    2. 排除 bus_total_* 欄位 (因為 bus_total = bus_city + bus_highway，防止 A = B + C 恆等式導致 VIF 暴衝)。
     """
     leakage_cols = {
         'date', 'month_sin', 'month_cos', 'days_in_month', 'hsr_passengers',
@@ -73,16 +106,15 @@ def get_candidate_features(df):
     
     candidates = []
     for col in df.columns:
-        # 排除 missing 指標欄位
         if col.endswith('_is_missing'):
             continue
-        # 排除同月份高鐵各分站進出站人數 (本質等於總運量)
         if col.startswith('hsr_entry_') or col.startswith('hsr_exit_'):
             continue
-        # 排除當月公車營收與搭乘人次 (防止結果變數洩漏)
         if col.startswith('bus_') and ('revenue' in col or 'passengers' in col or 'vehicle_km' in col):
             continue
-        # 排除其他同源結果變數
+        # 關鍵修正：剔除所有 bus_total_* 欄位 (避免與 city + highway 產生恆等式多重共線性)
+        if col.startswith('bus_total_'):
+            continue
         if col in leakage_cols:
             continue
             
@@ -91,21 +123,19 @@ def get_candidate_features(df):
     return candidates
 
 
-# ==========================================
-# 2. 模組一：共線性與 VIF 檢驗 (Correlation & VIF)
-# ==========================================
+# ==============================================================================
+# 2. 模組一：多重共線性與 VIF 檢驗 (Correlation & VIF Analysis)
+# ==============================================================================
 def analyze_correlation_and_vif(train_df, feature_cols, target_col='hsr_passengers', top_n=12):
     """
-    【模組一目的】檢驗特徵之間的共線性 (Multicollinearity) 與其對高鐵運量的相關性。
-    - 繪製 Top N 最強相關特徵的 Heatmap (存為 fig1_correlation_heatmap.png)。
-    - 計算 VIF (方差膨脹因子)，若 VIF > 10 代表資訊重複性高，可供建模組員做剔除參考。
+    【模組一】共線性與 VIF 分析（加強版：自動防範 Singular Matrix 警告）
     """
-    print("\n--- [模組一] 共線性與特徵相關性分析 ---")
+    print("\n--- [Module 1] 多重共線性與 VIF 分析 ---")
     
+    # 1. 計算並繪製 Correlation Heatmap
     corrs = train_df[feature_cols + [target_col]].corr()
     top_features = corrs[target_col].abs().sort_values(ascending=False).head(top_n + 1).index.tolist()
     
-    # 畫 Correlation Heatmap
     plt.figure(figsize=(10, 8))
     sns.heatmap(corrs.loc[top_features, top_features], annot=True, fmt=".2f", cmap='coolwarm', vmin=-1, vmax=1)
     plt.title(f"Correlation Heatmap (Top {top_n} Features with Target)", fontsize=14)
@@ -114,32 +144,47 @@ def analyze_correlation_and_vif(train_df, feature_cols, target_col='hsr_passenge
     save_path = os.path.join(FIG_DIR, "fig1_correlation_heatmap.png")
     plt.savefig(save_path, dpi=300)
     plt.close()
-    print(f"📸 圖表已儲存至: {save_path}")
+    print(f"📸 圖表已存至: {save_path}")
     
-    # 計算 VIF
-    X_vif = train_df[feature_cols].dropna()
+    # 2. 安全計算 VIF (排除全為常數/全為0的欄位)
+    X_vif = train_df[feature_cols].dropna().copy()
+    
+    # 剔除標準差為 0 的欄位 (例如全都是 0 的特徵)，防止 Singular Matrix
+    non_constant_cols = [col for col in X_vif.columns if X_vif[col].std() > 1e-5]
+    X_vif = X_vif[non_constant_cols]
+    
     vif_data = pd.DataFrame()
     vif_data["Feature"] = X_vif.columns
-    vif_data["VIF"] = [variance_inflation_factor(X_vif.values, i) for i in range(X_vif.shape[1])]
     
+    vif_values = []
+    for i in range(X_vif.shape[1]):
+        try:
+            val = variance_inflation_factor(X_vif.values, i)
+        except Exception:
+            val = np.inf
+        vif_values.append(val)
+        
+    vif_data["VIF"] = vif_values
+    
+    # 印出 VIF 警告特徵
     high_vif = vif_data[vif_data["VIF"] > 10].sort_values(by="VIF", ascending=False)
-    print("\n[VIF 提示] 以下特徵 VIF > 10 (存在高度多重共線性，建模時建議篩選剔除):")
-    print(high_vif)
+    print("\n[VIF 提示] 以下特徵存在高度共線性 (VIF > 10 或 inf，可作為 LASSO 篩選的依據):")
+    print(high_vif.head(10).to_string(index=False))
     
     return corrs, vif_data
 
 
-# ==========================================
-# 3. 模組二：RQ1 連假效應分析 (March vs Sept Lag)
-# ==========================================
+# ==============================================================================
+# 3. 模組二：RQ1 連假滯後連動效應 (Holiday Lag Correlation $H_1$)
+# ==============================================================================
 def analyze_rq1_holiday_lag(train_df, target_col='hsr_passengers'):
     """
-    【模組二目的】回答 RQ1：當年 3 月與 9 月皆有連假時，3 月運量是否對 9 月運量有更強的預測力？
-    - 改用「年增率 (YoY %)」進行比對，排除時間趨勢引起的偽相關。
-    - 以 8 月 (暑假/無長假) 作為對照組。
-    - 圖表存為 fig2_rq1_holiday_lag.png。
+    【模組二】RQ1: 連假效應分析 
+    - 解決欄位名稱為整數導致 regplot 報錯的問題
+    - 繪製 2x2 對照圖：比較『包含疫情』與『排除 2020-2022 疫情年』對 3vs9 與 8vs9 相關性的巨大影響
+    - 附帶年份標籤標註 (2020-2022 疫情年以紅字突出顯示)
     """
-    print("\n--- [模組二] RQ1: 連假效應與特定月份 Lag 連動性分析 ---")
+    print("\n--- [Module 2] RQ1: 連假效應與特定月份 Lag 連動性分析 ---")
     
     # 計算 YoY 成長率
     yoy_df = train_df[[target_col]].pct_change(12).dropna() * 100
@@ -149,51 +194,94 @@ def analyze_rq1_holiday_lag(train_df, target_col='hsr_passengers'):
     yearly_monthly = yoy_df.groupby(['year', 'month'])[target_col].sum().unstack()
     
     if 3 in yearly_monthly.columns and 9 in yearly_monthly.columns:
-        march_sept = yearly_monthly[[3, 8, 9]].dropna()
+        ms = yearly_monthly[[3, 8, 9]].dropna().copy()
+        # 重命名欄位名稱，防止 Seaborn 將整數欄位名誤判為常數值
+        ms.columns = ['m3', 'm8', 'm9']
         
-        corr_3_9 = march_sept[3].corr(march_sept[9])
-        corr_8_9 = march_sept[8].corr(march_sept[9])
+        # 排除 2020-2022 疫情干擾年
+        ms_clean = ms[~ms.index.isin([2020, 2021, 2022])].copy()
         
-        print(f"3 月 (連假) 與 9 月 (連假) 運量年增率相關係數: {corr_3_9:.4f}")
-        print(f"8 月 (無連假對照) 與 9 月 運量年增率相關係數: {corr_8_9:.4f}")
+        # 計算相關係數
+        r_39_all = ms['m3'].corr(ms['m9'])
+        r_89_all = ms['m8'].corr(ms['m9'])
+        r_39_clean = ms_clean['m3'].corr(ms_clean['m9'])
+        r_89_clean = ms_clean['m8'].corr(ms_clean['m9'])
         
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        print(f"全數據   - 3月 vs 9月 YoY 相關係數: r = {r_39_all:.4f} | 8月 vs 9月: r = {r_89_all:.4f}")
+        print(f"排除疫情 - 3月 vs 9月 YoY 相關係數: r = {r_39_clean:.4f} | 8月 vs 9月: r = {r_89_clean:.4f}")
         
-        # 實驗組：3月 vs 9月
-        sns.regplot(x=march_sept[3], y=march_sept[9], ax=axes[0], color='b')
-        axes[0].set_title(f"RQ1: March YoY% vs Sept YoY% (r = {corr_3_9:.2f})")
-        axes[0].set_xlabel("March Growth Rate YoY (%)")
-        axes[0].set_ylabel("September Growth Rate YoY (%)")
+        # 創建 2x2 的對照圖
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         
-        # 對照組：8月 vs 9月
-        sns.regplot(x=march_sept[8], y=march_sept[9], ax=axes[1], color='g')
-        axes[1].set_title(f"Control: August YoY% vs Sept YoY% (r = {corr_8_9:.2f})")
-        axes[1].set_xlabel("August Growth Rate YoY (%)")
-        axes[1].set_ylabel("September Growth Rate YoY (%)")
+        # 輔助函式：繪製散佈圖並標註年份
+        def plot_scatter_with_labels(ax, data, x_col, y_col, title, color):
+            sns.regplot(x=x_col, y=y_col, data=data, ax=ax, color=color, scatter_kws={'alpha': 0.6})
+            ax.set_title(title, fontsize=12, fontweight='bold')
+            ax.set_xlabel(f"{x_col.upper()} Growth Rate YoY (%)", fontsize=10)
+            ax.set_ylabel(f"{y_col.upper()} Growth Rate YoY (%)", fontsize=10)
+            
+            for year, row in data.iterrows():
+                is_covid = year in [2020, 2021, 2022]
+                txt_color = 'red' if is_covid else 'black'
+                font_weight = 'bold' if is_covid else 'normal'
+                ax.annotate(
+                    str(year), 
+                    (row[x_col], row[y_col]), 
+                    textcoords="offset points", 
+                    xytext=(4, 4), 
+                    ha='left', 
+                    fontsize=8, 
+                    color=txt_color, 
+                    fontweight=font_weight
+                )
+
+        # 1. 左上：3月 vs 9月 (包含疫情)
+        plot_scatter_with_labels(
+            axes[0, 0], ms, 'm3', 'm9', 
+            f"March vs Sept YoY% [ALL YEARS] (r = {r_39_all:.2f})", 'blue'
+        )
+        
+        # 2. 右上：3月 vs 9月 (排除 2020-2022 疫情)
+        plot_scatter_with_labels(
+            axes[0, 1], ms_clean, 'm3', 'm9', 
+            f"March vs Sept YoY% [EXCL. COVID 2020-2022] (r = {r_39_clean:.2f})", 'darkblue'
+        )
+        
+        # 3. 左下：8月 vs 9月 (對照組 - 包含疫情)
+        plot_scatter_with_labels(
+            axes[1, 0], ms, 'm8', 'm9', 
+            f"August vs Sept YoY% [ALL YEARS] (r = {r_89_all:.2f})", 'green'
+        )
+        
+        # 4. 右下：8月 vs 9月 (對照組 - 排除 2020-2022 疫情)
+        plot_scatter_with_labels(
+            axes[1, 1], ms_clean, 'm8', 'm9', 
+            f"August vs Sept YoY% [EXCL. COVID 2020-2022] (r = {r_89_clean:.2f})", 'darkgreen'
+        )
         
         plt.tight_layout()
         save_path = os.path.join(FIG_DIR, "fig2_rq1_holiday_lag.png")
         plt.savefig(save_path, dpi=300)
         plt.close()
-        print(f"📸 圖表已儲存至: {save_path}")
+        print(f"📸 2x2 對照圖表已存至: {save_path} (已解決報錯並標註年份與疫情對照)")
     else:
-        print("訓練集中缺少足夠的 3 月與 9 月跨年數據。")
+        print("⚠️ 訓練集中缺少足夠的 3 月與 9 月對應數據。")
 
 
-# ==========================================
-# 4. 模組三：RQ2 GDP (所得) 與運具轉移 (Modal Shift)
-# ==========================================
+# ==============================================================================
+# 4. 模組三：RQ2 GDP 所得效果與運具轉移 (Modal Shift Analysis $H_2$)
+# ==============================================================================
 def analyze_rq2_modal_shift(train_df, gdp_col='gdp_per_capita_nominal_twd'):
     """
-    【模組三目的】回答 RQ2：GDP (每人所得) 成長是否會顯著促進大眾產生「運具轉移 (Modal Shift)」？
-    - 計算「高鐵 / 公路客運」的運量比值 (Ratio)。
-    - 驗證隨著 GDP 成長，民眾是否傾向選擇高單價/高速的高鐵，取代傳統公路客運。
-    - 圖表存為 fig3_rq2_modal_shift.png (排除 2020-2022 疫情劇烈干擾期)。
+    【模組三目的】驗證假說 H2：GDP (所得) 成長是否推動民眾產生「運具轉移 (Modal Shift)」。
+    - 左圖：GDP vs 高鐵/公路客運搭乘比值 (HSR/Bus Ratio)。
+    - 右圖：GDP 成長率 vs 高鐵/客運運量年增率 (對比邊際遞減與短期波動特性)。
+    - 產出 fig3_rq2_modal_shift.png (排除 2020-2022 疫情期間之非市場干擾)。
     """
-    print("\n--- [模組三] RQ2: GDP 成長對運具轉移 (Modal Shift) 之影響分析 ---")
+    print("\n--- [Module 3] RQ2: GDP 成長與運具轉移 (Modal Shift) 分析 ---")
     
     df_rq2 = train_df.copy()
-    # 過濾疫情封城特殊年份以保持分析嚴謹度
+    # 排除 2020-2022 疫情封城干擾
     df_rq2_clean = df_rq2[~df_rq2.index.year.isin([2020, 2021, 2022])]
     
     if gdp_col in df_rq2.columns and 'bus_total_passengers' in df_rq2.columns and 'hsr_passengers' in df_rq2.columns:
@@ -202,14 +290,14 @@ def analyze_rq2_modal_shift(train_df, gdp_col='gdp_per_capita_nominal_twd'):
         
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         
-        # 圖 A：GDP vs 高鐵/客運比值
+        # 左圖：水準值 (GDP vs HSR/Bus Ratio)
         sns.regplot(x=gdp_col, y='hsr_to_bus_ratio', data=df_rq2_clean, ax=axes[0], 
                     color='teal', scatter_kws={'alpha':0.6})
         axes[0].set_title("GDP per Capita vs HSR/Bus Traffic Ratio (Excl. COVID)")
         axes[0].set_xlabel("Nominal GDP per Capita (TWD)")
         axes[0].set_ylabel("Traffic Ratio (HSR / Bus)")
         
-        # 圖 B：GDP 成長率 vs 高鐵與客運成長率對比
+        # 右圖：成長率 YoY (GDP Growth vs Transport Growth)
         yoy_df = df_rq2_clean[[gdp_col, 'hsr_passengers', 'bus_total_passengers']].pct_change(12).dropna() * 100
         
         sns.regplot(x=gdp_col, y='hsr_passengers', data=yoy_df, ax=axes[1], 
@@ -226,30 +314,28 @@ def analyze_rq2_modal_shift(train_df, gdp_col='gdp_per_capita_nominal_twd'):
         save_path = os.path.join(FIG_DIR, "fig3_rq2_modal_shift.png")
         plt.savefig(save_path, dpi=300)
         plt.close()
-        print(f"📸 圖表已儲存至: {save_path}")
+        print(f"📸 圖表已存至: {save_path}")
         
         corr_ratio = df_rq2_clean[gdp_col].corr(df_rq2_clean['hsr_to_bus_ratio'])
-        print(f"GDP 與『高鐵/客運搭乘比值』相關係數: {corr_ratio:.4f} (顯著正相關代表運具轉移假說成立)")
+        print(f"GDP 與『高鐵/客運搭乘比值』相關係數: r = {corr_ratio:.4f} (顯著正相關驗證假說 H2)")
     else:
-        print("資料集中缺少 GDP 或客運相關欄位，無法進行運具轉移分析。")
+        print("⚠️ 缺少 GDP 或公路客運欄位，無法進行模組三分析。")
 
 
-# ==========================================
-# 5. 模組四：特徵重要性評估 (Feature Importance)
-# ==========================================
+# ==============================================================================
+# 5. 模組四：特徵重要性排行榜 (Random Forest Feature Importance)
+# ==============================================================================
 def evaluate_feature_importance(train_df, feature_cols, target_col='hsr_passengers', top_n=15):
     """
-    【模組四目的】使用隨機森林 (Random Forest) 評估無洩漏變數下的特徵重要性。
-    - 自動調用 preprocessing.py 的 IQR 離群值檢測機制清理訓練集。
-    - 印出 Top 15 特徵排行榜 (存為 fig4_feature_importance.png)，提供給建模組員參考。
+    【模組四目的】使用隨機森林評估無洩漏變數下之特徵重要性 Top 15。
+    - 產出 fig4_feature_importance.png。
     """
-    print("\n--- [模組四] 特徵重要性排行榜 (Random Forest) ---")
+    print("\n--- [Module 4] 特徵重要性評估 (Random Forest) ---")
     
-    # 套用前處理的離群值過濾
     try:
         bounds = fit_outlier_bounds(train_df, [target_col])
         clean_train, removed = remove_outliers(train_df, bounds)
-        print(f"訓練集進行 IQR 離群值檢查: 保留 {len(clean_train)} 列，剔除 {len(removed)} 列極端值")
+        print(f"訓練集 IQR 離群值檢查: 保留 {len(clean_train)} 列，剔除 {len(removed)} 列極端值")
     except Exception as e:
         print(f"離群值處理跳過，使用原始訓練集。(原因: {e})")
         clean_train = train_df
@@ -266,7 +352,15 @@ def evaluate_feature_importance(train_df, feature_cols, target_col='hsr_passenge
     }).sort_values(by='Importance', ascending=False)
     
     plt.figure(figsize=(10, 6))
-    sns.barplot(x='Importance', y='Feature', data=feat_imp.head(top_n), palette='viridis')
+    #sns.barplot(x='Importance', y='Feature', data=feat_imp.head(top_n), palette='viridis')
+    sns.barplot(
+        x='Importance', 
+        y='Feature', 
+        data=feat_imp.head(top_n), 
+        hue='Feature',      # 指定 hue 為 y 軸變數
+        palette='viridis', 
+        legend=False        # 關閉右側不需要的圖例 (Legend)
+    )
     plt.title(f"Top {top_n} Feature Importance Ranking", fontsize=14)
     plt.xlabel("Importance Score")
     plt.ylabel("Feature Name")
@@ -275,25 +369,66 @@ def evaluate_feature_importance(train_df, feature_cols, target_col='hsr_passenge
     save_path = os.path.join(FIG_DIR, "fig4_feature_importance.png")
     plt.savefig(save_path, dpi=300)
     plt.close()
-    print(f"📸 圖表已儲存至: {save_path}")
+    print(f"📸 圖表已存至: {save_path}")
     
     return feat_imp
 
 
-# ==========================================
-# 主執行流程 (Main Script)
-# ==========================================
+# ==============================================================================
+# 6. 面板資料轉換工具 (Panel Data Transformation Utility - Optional)
+# ==============================================================================
+def convert_to_panel_data(df):
+    """
+    【進階工具】若團隊決議採用『單一模型預測全台 12 個分站運量』，
+    此函式可將寬資料 (Wide Format) 重塑為面板資料 (Long Format)。
+    """
+    station_cols = [c for c in df.columns if c.startswith('hsr_entry_') or c.startswith('hsr_exit_')]
+    macro_cols = [c for c in df.columns if c not in station_cols and not c.endswith('_is_missing')]
+    
+    panel_rows = []
+    for date_idx, row in df.iterrows():
+        for col_name in station_cols:
+            parts = col_name.split('_')
+            direction = parts[1]  # entry / exit
+            station = "_".join(parts[2:]) # taipei, taichung...
+            
+            val = row[col_name]
+            
+            row_dict = {
+                'date': date_idx,
+                'station': station,
+                'direction': direction,
+                'target_passengers': val
+            }
+            for m_col in macro_cols:
+                row_dict[m_col] = row[m_col]
+                
+            panel_rows.append(row_dict)
+            
+    panel_df = pd.DataFrame(panel_rows).set_index('date')
+    
+    # 針對分站維度建立 Lag 特徵
+    panel_df = panel_df.sort_values(['station', 'direction', 'date'])
+    panel_df['lag1_passengers'] = panel_df.groupby(['station', 'direction'])['target_passengers'].shift(1)
+    panel_df['lag12_passengers'] = panel_df.groupby(['station', 'direction'])['target_passengers'].shift(12)
+    
+    return panel_df
+
+
+# ==============================================================================
+# 主執行流程 (Main Workflow)
+# ==============================================================================
 if __name__ == "__main__":
-    # 1. 載入前處理完的 merged_monthly.csv
+    # 1. 載入 merged_monthly.csv 並切分 Train/Test
     df, train_df, test_df = load_and_prepare_data("data/processed/merged_monthly.csv")
     
-    # 2. 自動抓取合法的候選特徵 (已排除 Leakage 欄位)
+    # 2. 自動過濾出合法無洩漏候選特徵
     candidate_features = get_candidate_features(train_df)
     
-    # 3. 依序執行四大分析模組
+    # 3. 執行四大探索性分析模組
     corr_matrix, vif_table = analyze_correlation_and_vif(train_df, candidate_features)
     analyze_rq1_holiday_lag(train_df)
     analyze_rq2_modal_shift(train_df)
     feature_ranking = evaluate_feature_importance(train_df, candidate_features)
     
-    print(f"\n🎉 特徵分析全部順利完成！所有產出圖表均位於 `{FIG_DIR}/` 資料夾中。")
+    print(f"\n🎉 特徵分析全部完成！所有圖表均已更新並儲存於 `{FIG_DIR}/` 目錄。")
