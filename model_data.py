@@ -33,6 +33,11 @@ FEATURE_COLUMNS = (
     "days_in_month",
     "long_holiday_count",
 )
+HOLIDAY_FEATURE_COLUMNS = FEATURE_COLUMNS + (
+    "long_holiday_days_started",
+    "long_holiday_days_ended",
+    "long_holiday_days_in_month",
+)
 
 
 @dataclass
@@ -46,7 +51,8 @@ class ModelData:
 
 
 def load_model_data(
-    csv_path: str | Path = DEFAULT_DATA_PATH, test_months: int = 24
+    csv_path: str | Path = DEFAULT_DATA_PATH, test_months: int = 24,
+    feature_columns: tuple[str, ...] = FEATURE_COLUMNS,
 ) -> ModelData:
     """Read monthly data and reserve the last ``test_months`` for final testing.
 
@@ -57,7 +63,9 @@ def load_model_data(
         raise ValueError("test_months must be a positive integer")
 
     frame = pd.read_csv(csv_path, encoding="utf-8-sig")
-    required = {"date", *TARGET_COLUMNS, *FEATURE_COLUMNS[1:]}
+    if not feature_columns or feature_columns[0] != "month_index" or len(set(feature_columns)) != len(feature_columns):
+        raise ValueError("feature_columns must start with month_index and contain unique columns")
+    required = {"date", *TARGET_COLUMNS, *feature_columns[1:]}
     missing = required.difference(frame.columns)
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
@@ -74,7 +82,7 @@ def load_model_data(
 
     first = frame.index[0]
     month_index = (frame.index.year - first.year) * 12 + frame.index.month - first.month
-    X = frame.loc[:, FEATURE_COLUMNS[1:]].apply(pd.to_numeric, errors="raise")
+    X = frame.loc[:, feature_columns[1:]].apply(pd.to_numeric, errors="raise")
     X.insert(0, "month_index", month_index)
     y = frame.loc[:, TARGET_COLUMNS].apply(pd.to_numeric, errors="raise")
     if not np.isfinite(X.to_numpy()).all() or not np.isfinite(y.to_numpy()).all():
@@ -87,6 +95,30 @@ def load_model_data(
         y_train=y.iloc[:split_at].copy(),
         y_test=y.iloc[split_at:].copy(),
     )
+
+
+def add_target_lag(data: ModelData, target: str, months: int = 24) -> ModelData:
+    """Add one target's known value from exactly `months` earlier.
+
+    Only supports test windows no longer than the lag, so every test feature
+    is known at the start of the held-out forecast period. Early training rows
+    without lag history are removed; validation folds remain chronological.
+    """
+    if target not in data.y_train or months < len(data.X_test):
+        raise ValueError("Target must exist and lag must cover the test horizon")
+    values = pd.concat([data.y_train[target], data.y_test[target]])
+    lag = values.shift(months).rename(f"{target}_lag_{months}")
+    train_lag = lag.loc[data.X_train.index]
+    valid_train = train_lag.notna()
+    X_train = data.X_train.loc[valid_train].copy()
+    X_train[lag.name] = train_lag.loc[valid_train]
+    X_test = data.X_test.copy()
+    X_test[lag.name] = lag.loc[X_test.index]
+    if X_test[lag.name].isna().any():
+        raise ValueError("Missing lag history for test period")
+    return ModelData(X_train=X_train, X_test=X_test,
+                     y_train=data.y_train.loc[valid_train].copy(),
+                     y_test=data.y_test.copy())
 
 
 def make_time_series_cv(
