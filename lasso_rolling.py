@@ -64,7 +64,7 @@ def main():
         predicted[target] = values
         coefficient_rows.extend({"target": target, "alpha": alpha, "window_months": window,
                                  **row} for row in coefs)
-    save_results(out, "Rolling Lasso", targets, predicted, settings, coefficient_rows)
+    save_results(out, targets, predicted, settings, coefficient_rows)
 
 
 if __name__ == "__main__":

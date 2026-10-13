@@ -45,7 +45,7 @@ def coefficients(model, columns):
             **dict(zip(columns, coef))}
 
 
-def save_results(out, label, targets, predicted, settings, coefficient_rows):
+def save_results(out, targets, predicted, settings, coefficient_rows):
     out.mkdir(parents=True, exist_ok=True)
     rows, prediction_rows = [], []
     for target in predicted:
@@ -58,14 +58,5 @@ def save_results(out, label, targets, predicted, settings, coefficient_rows):
     pd.DataFrame(rows).to_csv(out / "test_metrics.csv", index=False)
     pd.DataFrame(prediction_rows).to_csv(out / "test_predictions.csv", index=False)
     pd.DataFrame(coefficient_rows).to_csv(out / "coefficients.csv", index=False)
-    entry = [c for c in targets if c.startswith("hsr_entry_")]
-    total = targets[entry].sum(axis=1)
-    actual, forecast = total.loc[predicted.index], predicted[entry].sum(axis=1)
-    naive = total.shift(12).loc[predicted.index]
-    pd.DataFrame({"actual_total_entries": actual, "lasso_predicted": forecast,
-                  "seasonal_naive_predicted": naive}).rename_axis("date").to_csv(out / "total_predictions.csv")
-    comparison = pd.DataFrame([{"model": label, **metrics(actual, forecast)},
-                               {"model": "Seasonal Naive (t-12)", **metrics(actual, naive)}])
-    comparison.to_csv(out / "total_metrics_comparison.csv", index=False)
-    print(comparison.to_string(index=False), flush=True)
+    print(pd.DataFrame(rows)[["MAE", "RMSE", "R2", "MAPE_pct"]].mean().to_string(), flush=True)
     print(f"Saved: {out}", flush=True)

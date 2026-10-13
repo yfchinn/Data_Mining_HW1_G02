@@ -98,12 +98,10 @@ def main():
     print(f"\n選定視窗：{best_window} 個月")
 
     station_rows, prediction_rows, coefficient_rows = [], [], []
-    predictions_by_target = pd.DataFrame(index=test_dates)
     for target in targets.columns:
         predictions, coefs = walk_forward(
             feature_cache[target], targets[target], test_dates, best_window
         )
-        predictions_by_target[target] = predictions.predicted
         station_rows.append({"target": target, "window_months": best_window, **metrics(predictions.actual, predictions.predicted)})
         for date, row in predictions.iterrows():
             prediction_rows.append({
@@ -121,33 +119,8 @@ def main():
     pd.DataFrame(prediction_rows).to_csv(OUT / "test_predictions.csv", index=False)
     pd.DataFrame(coefficient_rows).to_csv(OUT / "monthly_coefficients.csv", index=False)
 
-    entry_cols = [c for c in targets.columns if c.startswith("hsr_entry_")]
-    actual_total = targets.loc[test_dates, entry_cols].sum(axis=1)
-    rolling_total = predictions_by_target[entry_cols].sum(axis=1)
-    seasonal_total = targets[entry_cols].sum(axis=1).shift(12).loc[test_dates]
-    if seasonal_total.isna().any():
-        raise ValueError("季節性基準缺少去年同月資料")
-
-    total_predictions = pd.DataFrame({
-        "actual_total_entries": actual_total,
-        "rolling_OLS_predicted": rolling_total,
-        "seasonal_naive_predicted": seasonal_total,
-    })
-    total_predictions.index.name = "date"
-    total_predictions.to_csv(OUT / "total_predictions.csv", encoding="utf-8-sig")
-    comparison = pd.DataFrame([
-        {"model": "Rolling OLS", **metrics(actual_total, rolling_total)},
-        {"model": "Seasonal Naive (t-12)", **metrics(actual_total, seasonal_total)},
-    ])
-    comparison.to_csv(OUT / "total_metrics_comparison.csv", index=False)
-
     print("\n【各站進出站：測試集平均指標】")
     print(station_df[["MAE", "RMSE", "R2", "MAPE_pct"]].mean().round(3).to_string())
-    print("\n【全高鐵每月總進站人次：測試集比較】")
-    print(comparison.to_string(index=False, formatters={
-        "MAE": "{:,.0f}".format, "RMSE": "{:,.0f}".format,
-        "R2": "{:.3f}".format, "MAPE_pct": "{:.2f}%".format,
-    }))
     print("\n提醒：此實驗每個月會使用上一個月已觀測到的真實運量重新訓練。")
     print("比較 LASSO 前，請先確認目標、資料期間、特徵與評估方法一致。")
     print(f"結果儲存位置：{OUT}")

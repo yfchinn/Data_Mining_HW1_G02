@@ -56,15 +56,10 @@ def main():
     targets = pd.concat([data.y_train, data.y_test])
     folds = list(make_time_series_cv(data, n_splits=4, validation_months=24)
                  .split(data.X_train))
-    entries = [target for target in targets if target.startswith("hsr_entry_")]
-    actual_total = targets.loc[data.X_test.index, entries].sum(axis=1)
-
-    comparison, station_rows, cv_rows, prediction_rows, coefficient_rows = [], [], [], [], []
+    station_rows, cv_rows, prediction_rows, coefficient_rows = [], [], [], []
     for model_name in ("OLS", "Lasso"):
         for variant in VARIANTS:
             print(f"Static {model_name}: {variant}", flush=True)
-            predicted = pd.DataFrame(index=data.X_test.index)
-            target_cv_maes = []
             for target in targets:
                 X = experiment_features(calendar, targets[target], variant)
                 fold_data = []
@@ -92,8 +87,6 @@ def main():
                                         **info, "alpha": alpha, **result})
                     scores.append((float(np.mean(fold_scores)), alpha))
                 selected_mae, selected_alpha = min(scores, key=lambda item: item[0])
-                target_cv_maes.append(selected_mae)
-
                 train = X.loc[data.X_train.index].dropna()
                 test = X.loc[data.X_test.index]
                 if test.isna().any().any():
@@ -102,7 +95,6 @@ def main():
                          else model_for(selected_alpha))
                 model.fit(train, targets.loc[train.index, target])
                 predictions = model.predict(test)
-                predicted[target] = predictions
                 station_rows.append({"method": "static", "model": model_name, "variant": variant,
                                      "target": target, "alpha": selected_alpha,
                                      "validation_mae": selected_mae,
@@ -123,11 +115,6 @@ def main():
                 coefficient_rows.append({"method": "static", "model": model_name, "variant": variant,
                                          "target": target, "alpha": selected_alpha,
                                          **coefs})
-            comparison.append({"method": "static", "model": model_name, "variant": variant,
-                               "window_months": np.nan, "n_features": X.shape[1],
-                               "mean_station_validation_mae": float(np.mean(target_cv_maes)),
-                               **metrics(actual_total, predicted[entries].sum(axis=1))})
-
     validation_dates = data.X_train.index[-24:]
     for model_name in ("OLS", "Lasso"):
         for variant in VARIANTS:
@@ -156,13 +143,11 @@ def main():
             cv_rows.extend(rows)
             selection = selected[selected.window_months.eq(window)].set_index("target")
             print(f"Rolling {model_name}: {variant}, selected window={window}", flush=True)
-            predicted = pd.DataFrame(index=data.X_test.index)
             for target in targets:
                 alpha = int(selection.loc[target, "alpha"]) if model_name == "Lasso" else None
                 values, coefs = rolling_predictions(
                     cache[target], targets[target], data.X_test.index, window,
                     model_name, alpha, keep_coefficients=True)
-                predicted[target] = values
                 station_rows.append({"method": "rolling", "model": model_name,
                                      "variant": variant, "target": target,
                                      "alpha": alpha, "window_months": window,
@@ -179,52 +164,13 @@ def main():
                                          "variant": variant, "target": target,
                                          "alpha": alpha, "window_months": window, **row}
                                         for row in coefs)
-            comparison.append({"method": "rolling", "model": model_name, "variant": variant,
-                               "window_months": window,
-                               "n_features": cache[targets.columns[0]].shape[1],
-                               "mean_station_validation_mae": summary.loc[window],
-                               **metrics(actual_total, predicted[entries].sum(axis=1))})
-
-    for method, model_name, directory in (("static", "OLS", "ols_static_lag"),
-                                         ("static", "Lasso", "lasso_static_lag"),
-                                         ("rolling", "OLS", "ols_rolling"),
-                                         ("rolling", "Lasso", "lasso_rolling")):
-        old = pd.read_csv(OUT / directory / "total_metrics_comparison.csv").iloc[0]
-        if method == "static":
-            old_cv = pd.read_csv(OUT / directory / "cv_metrics.csv")
-            validation_mae = old_cv.groupby("target").MAE.mean().mean()
-            window = np.nan
-        else:
-            old_cv = pd.read_csv(OUT / directory / "window_validation_summary.csv")
-            best = old_cv.loc[old_cv.MAE.idxmin()]
-            validation_mae, window = best.MAE, int(best.window_months)
-        comparison.append({"method": method, "model": model_name, "variant": "baseline",
-                           "n_features": 10, "window_months": window,
-                           "mean_station_validation_mae": validation_mae,
-                           **{key: old[key] for key in ("MAE", "RMSE", "R2", "MAPE_pct")}})
-    old = pd.read_csv(OUT / "ols_static_lag" / "total_metrics_comparison.csv").iloc[1]
-    comparison.append({"method": "reference", "model": "Seasonal naive", "variant": "t-12",
-                       "n_features": 1, "mean_station_validation_mae": np.nan,
-                       **{key: old[key] for key in ("MAE", "RMSE", "R2", "MAPE_pct")}})
-
     OUT.mkdir(parents=True, exist_ok=True)
-    baseline_maes = {(row["method"], row["model"]): row["MAE"]
-                     for row in comparison if row["variant"] == "baseline"}
-    for row in comparison:
-        key = (row["method"], row["model"])
-        if key in baseline_maes:
-            row["mae_improvement_vs_baseline_pct"] = (1 - row["MAE"] / baseline_maes[key]) * 100
-        row["mae_improvement_vs_seasonal_pct"] = (1 - row["MAE"] / old["MAE"]) * 100
-    comparison.sort(key=lambda row: (
-        {"static": 0, "rolling": 1, "reference": 2}[row["method"]],
-        {"OLS": 0, "Lasso": 1, "Seasonal naive": 2}[row["model"]],
-        {"baseline": 0, "raw": 1, "raw_log1p": 2, "t-12": 3}[row["variant"]]))
-    pd.DataFrame(comparison).to_csv(OUT / "static_holiday_comparison.csv", index=False)
     pd.DataFrame(station_rows).to_csv(OUT / "static_holiday_station_metrics.csv", index=False)
     pd.DataFrame(cv_rows).to_csv(OUT / "static_holiday_cv_metrics.csv", index=False)
     pd.DataFrame(prediction_rows).to_csv(OUT / "static_holiday_predictions.csv", index=False)
     pd.DataFrame(coefficient_rows).to_csv(OUT / "static_holiday_coefficients.csv", index=False)
-    print(pd.DataFrame(comparison).to_string(index=False))
+    print(pd.DataFrame(station_rows).groupby(["method", "model", "variant"])[
+        ["MAE", "RMSE", "R2", "MAPE_pct"]].mean().to_string())
 
 
 if __name__ == "__main__":

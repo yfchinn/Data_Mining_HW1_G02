@@ -41,7 +41,6 @@ def main():
     folds = list(make_time_series_cv(data, n_splits=4, validation_months=24).split(data.X_train))
 
     cv_rows, test_rows, prediction_rows, coefficient_rows = [], [], [], []
-    predictions_by_target = pd.DataFrame(index=test_dates)
     fold_audit = []
 
     for target in targets.columns:
@@ -77,7 +76,6 @@ def main():
         # Static fit: train once through 2024-06; no refitting during test.
         model = LinearRegression().fit(X_train, y_train)
         predicted = model.predict(X_test)
-        predictions_by_target[target] = predicted
         test_rows.append({"target": target, "n_train": len(X_train),
                           "train_start": X_train.index[0].strftime("%Y-%m"),
                           "train_end": X_train.index[-1].strftime("%Y-%m"),
@@ -102,25 +100,6 @@ def main():
     pd.DataFrame(prediction_rows).to_csv(out / "test_predictions.csv", index=False, encoding="utf-8-sig")
     pd.DataFrame(coefficient_rows).to_csv(out / "coefficients.csv", index=False, encoding="utf-8-sig")
 
-    entry_cols = [c for c in targets if c.startswith("hsr_entry_")]
-    actual_total = targets.loc[test_dates, entry_cols].sum(axis=1)
-    static_total = predictions_by_target[entry_cols].sum(axis=1)
-    seasonal_total = targets[entry_cols].sum(axis=1).shift(12).loc[test_dates]
-    if seasonal_total.isna().any():
-        raise ValueError("季節性基準缺少去年同月資料")
-    total_predictions = pd.DataFrame({
-        "actual_total_entries": actual_total,
-        "static_OLS_lag_predicted": static_total,
-        "seasonal_naive_predicted": seasonal_total,
-    })
-    total_predictions.index.name = "date"
-    total_predictions.to_csv(out / "total_predictions.csv", encoding="utf-8-sig")
-    comparison = pd.DataFrame([
-        {"model": "Static OLS + Lag", **metrics(actual_total, static_total)},
-        {"model": "Seasonal Naive (t-12)", **metrics(actual_total, seasonal_total)},
-    ])
-    comparison.to_csv(out / "total_metrics_comparison.csv", index=False, encoding="utf-8-sig")
-
     print("【實驗設定】")
     print(f"訓練期間：{train_dates.min():%Y-%m} ～ {train_dates.max():%Y-%m}（各站排除營運前資料及初始 12 個月歷史特徵缺值）")
     print(f"最終測試：{test_dates.min():%Y-%m} ～ {test_dates.max():%Y-%m}")
@@ -131,11 +110,6 @@ def main():
     print(cv_df[["MAE", "RMSE", "R2", "MAPE_pct"]].mean().round(3).to_string())
     print("\n【各站進出站：測試集平均指標】")
     print(test_df[["MAE", "RMSE", "R2", "MAPE_pct"]].mean().round(3).to_string())
-    print("\n【全高鐵每月總進站人次：測試集比較】")
-    print(comparison.to_string(index=False, formatters={
-        "MAE": "{:,.0f}".format, "RMSE": "{:,.0f}".format,
-        "R2": "{:.3f}".format, "MAPE_pct": "{:.2f}%".format,
-    }))
     print(f"\n結果已儲存至：{out}")
 
 

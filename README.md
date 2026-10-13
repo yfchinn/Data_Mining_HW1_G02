@@ -62,8 +62,8 @@ On branch `experiment-v2`, `OLS_static_lag.py`, `OLS_rolling.py`,
 `lasso_static_lag.py`, and `lasso_rolling.py` share the operating-history rules
 in `station_history.py`. Run these same scripts to write **new** outputs under
 `results/experiment_v2/{ols_static_lag,ols_rolling,lasso_static_lag,lasso_rolling}/`.
-The original results and baseline `OLS.py` / `lasso.py` remain historical v1
-experiments; those two baseline scripts do not apply the new rules.
+The original `OLS.py` / `lasso.py` are historical scripts and do not apply
+these operating-history rules.
 
 - Use documented opening months from `preprocessing.OPENING_MONTHS`; stations
   already operating at the dataset start use January 2007. Retain partial
@@ -86,17 +86,6 @@ experiments; those two baseline scripts do not apply the new rules.
   Lasso also selects alpha per target. Monthly coefficient reports include
   the actual training start, end, and sample count.
 - Test remains one step ahead using previously observed monthly usage.
-
-Full-line monthly **entry** test results (24 months), saved in
-`results/experiment_v2/model_comparison.csv`:
-
-| Model | Selected rolling window | MAE | MAPE |
-| --- | ---: | ---: | ---: |
-| Static OLS + Lag | — | 346,424 | 5.031% |
-| Static Lasso + Lag | — | 357,798 | 5.159% |
-| Rolling OLS | 60 | 403,149 | 6.003% |
-| Rolling Lasso | 36 | 297,206 | 4.312% |
-| Seasonal naive (t-12) | — | 368,317 | 5.319% |
 
 Window choices are based on validation, not the test results. V2 changes both
 the eligible history and validation/window selection; its difference from v1
@@ -125,37 +114,10 @@ target/window. Window and alpha choices are frozen before test evaluation.
 All experiments forecast one month ahead on July 2024–June 2026 using previously
 observed usage.
 
-The consolidated report is `results/experiment_v2/static_holiday_comparison.csv`.
-It now contains **both static and rolling** results, their corresponding v2
-baselines, and seasonal naive (t-12). Positive
-`mae_improvement_vs_baseline_pct` means lower test MAE than the same method/model
-with the original holiday count. The `static_holiday_` station metrics, CV
-metrics, predictions, and coefficient files are overwritten together and
-include a `method` column. These replace the earlier log-only experiment;
-static raw results are retained as a reference by rerunning them.
-
-Full-line monthly entry test results (MAE in persons/month):
-
-| Method/model | Holiday inputs | Window | MAE | MAPE | MAE improvement vs own v2 baseline |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Static OLS | Baseline count | — | 346,424 | 5.031% | — |
-| Static OLS | Raw pair | — | 342,757 | 4.973% | 1.06% |
-| Static OLS | Raw pair + log1p pair | — | 335,782 | 4.871% | 3.07% |
-| Static Lasso | Baseline count | — | 357,798 | 5.159% | — |
-| Static Lasso | Raw pair | — | 347,630 | 5.021% | 2.84% |
-| Static Lasso | Raw pair + log1p pair | — | 346,760 | 5.007% | 3.09% |
-| Rolling OLS | Baseline count | 60 | 403,149 | 6.003% | — |
-| Rolling OLS | Raw pair | 60 | 395,402 | 5.897% | 1.92% |
-| Rolling OLS | Raw pair + log1p pair | 60 | 402,401 | 5.994% | 0.19% |
-| Rolling Lasso | Baseline count | 36 | 297,206 | 4.312% | — |
-| Rolling Lasso | Raw pair | 36 | 296,902 | 4.306% | 0.10% |
-| Rolling Lasso | Raw pair + log1p pair | 36 | 297,806 | 4.321% | -0.20% |
-| Seasonal naive | Last year's month | — | 368,317 | 5.319% | — |
-
-The static raw-plus-log variant improves both validation and test MAE compared
-with the raw pair. Rolling Lasso's raw-pair improvement over baseline is very
-small. Rolling OLS's holiday variants remain worse than seasonal naive on test;
-their validation MAE also exceeds the OLS baseline's validation MAE.
+The `static_holiday_` station metrics, CV metrics, predictions, and coefficient
+files are overwritten together and include a `method` column. The earlier
+log-only experiment was replaced; static raw results are retained by rerunning
+them.
 
 CV scores are parameter-selection scores rather than independent estimates of
 the selected model's performance. Comparisons with the v2 baseline change
@@ -163,14 +125,45 @@ holiday representation and may change rolling window and Lasso alpha. Calendar
 data are retrospective: revisions published after a forecast month would not
 have been known at that time.
 
-Run `uv run --no-project python summarize_station_results.py` to compare
+Run `uv run --no-project python summarize_station_results.py` after the four
+baseline scripts and `static_holiday_experiment.py` to compare
 per-station entry and exit errors against each model and the seasonal naive
 forecast (previous year's same month). The generated
 `results/experiment_v2/station_method_report.md` includes each station's MAPE;
 `station_method_comparison.csv` contains MAE, RMSE, R², and MAPE for every
 target and setting; `station_method_summary.csv` averages each metric equally
-over the 24 entry/exit targets. These station averages are different from the
-full-line entry totals above.
+over the 24 entry/exit targets. Positive
+`mae_improvement_vs_seasonal_pct` means lower per-target MAE than the same
+station's previous-year-same-month forecast.
+
+| Setting | Equal-weight MAE (persons) | Equal-weight MAPE |
+| --- | ---: | ---: |
+| Seasonal naive (t-12) | 36,318 | 7.42% |
+| Static OLS, baseline / raw / raw + log1p | 33,481 / 32,419 / 31,985 | 6.29% / 6.06% / 5.93% |
+| Static Lasso, baseline / raw / raw + log1p | 34,229 / 32,598 / 32,798 | 7.18% / 6.37% / 6.39% |
+| Rolling OLS, baseline / raw / raw + log1p | 39,704 / 37,301 / 37,983 | 7.25% / 6.89% / 7.06% |
+| Rolling Lasso, baseline / raw / raw + log1p | 28,455 / 28,276 / 28,352 | 5.50% / 5.42% / 5.43% |
+
+These values first calculate each target's error over 24 test months and then
+average the 24 entry/exit targets equally. See the generated station report for
+RMSE, R², and individual stations.
+
+To rebuild the v2 outputs from the committed processed data, run from the
+repository root:
+
+```bash
+uv pip install -r requirements.txt
+uv run --no-project python OLS_static_lag.py
+uv run --no-project python lasso_static_lag.py
+uv run --no-project python OLS_rolling.py
+uv run --no-project python lasso_rolling.py
+uv run --no-project python static_holiday_experiment.py
+uv run --no-project python summarize_station_results.py
+```
+
+The model scripts write station predictions and metrics. The final script
+creates the equal-weight station comparison and t-12 reference. It does not
+need the discarded whole-network output files.
 
 Run the history and leakage checks with:
 
@@ -178,66 +171,8 @@ Run the history and leakage checks with:
 uv run --no-project python -m unittest test_station_history
 ```
 
-## Historical v1: Lasso experiments aligned with OLS
-
-Reference: `origin/feature/experiment-v1`, commit
-`960ab07b3e6d414bd44e830dcb90367994b0d929` (`OLS_static_lag.py`, `OLS_rolling.py`).
-The processed monthly data is identical on both branches.
-
-```bash
-uv pip install -r requirements.txt
-uv run --no-project python lasso_static_lag.py
-uv run --no-project python lasso_rolling.py
-```
-
-Both use ten features: `month_index`, `month_sin`, `month_cos`, `days_in_month`,
-`long_holiday_count`, the target's `lag_1`, `lag_3`, `lag_12`, and means of its
-previous 3 and 12 months. Rolling means are shifted before aggregation.
-`lasso_features.py` shares feature generation, metrics and reporting.
-
-These are **one-month-ahead evaluations**: actual usage of preceding months
-is available at each forecast date. Test dates are July 2024–June 2026.
-No current-month or future target is used in features, fitting, scaling or tuning.
-
-| Script | Fitting and validation | Reports |
-| --- | --- | --- |
-| `lasso_static_lag.py` | Four expanding folds of 24 months, using OLS fold boundaries. Choose each target's alpha by mean validation MAE, then fit once through June 2024. Update lag features with observed history during test, keeping coefficients fixed. | `results/lasso_static_lag/` |
-| `lasso_rolling.py` | Monthly refits on the latest 36/60/120 available training months. Validate on July 2022–June 2024; choose alpha per target/window, then choose one common window by average station MAE. Freeze the window and alphas for test. | `results/lasso_rolling/` |
-
-Alpha candidates are `1, 10, 100, 1000, 10000, 100000, 1000000`.
-Each fit uses `StandardScaler` fitted only on its own training rows.
-Reported coefficients are converted back to original feature units.
-Validation scores are used for parameter selection, rather than providing an
-independent estimate of the selected model's generalization error.
-MAE, RMSE, R2 and MAPE definitions match OLS (MAPE excludes zero actuals).
-Total comparison sums entry predictions only and uses the same t-12 baseline.
-Monthly availability of observed usage is assumed, as in OLS.
-
-Total monthly entry results on the same 24 test months are saved in
-`results/lasso_ols_comparison.csv`. Rolling Lasso selects a 120-month window,
-the same as the reference OLS run.
-
-| Model | MAE (persons/month) | RMSE | MAPE |
-| --- | ---: | ---: | ---: |
-| Static OLS + Lag | 342,157 | 400,706 | 4.974% |
-| Static Lasso + Lag | 341,364 | 408,066 | 4.941% |
-| Rolling OLS | 357,708 | 409,961 | 5.242% |
-| Rolling Lasso | 352,912 | 409,957 | 5.140% |
-| Seasonal naive (t-12) | 368,317 | 445,376 | 5.319% |
-
-Lasso improves MAE/MAPE slightly; static Lasso has worse RMSE than static OLS.
-These results do not establish a large or statistically significant advantage.
-
-Known limitation: these runs retain pre-opening station zeros, matching the
-reference OLS experiments. Early static validation folds have insufficient
-post-opening history for Nangang, Miaoli, Changhua, and Yunlin. Excluding
-pre-opening rows and skipping folds with insufficient valid history has been
-discussed but is not implemented in these results.
-
-The original `lasso.py` remains unchanged. Historical lag-only and holiday
-experiment reports remain in `reports/`. Their scripts are available at commit
-`2a0c3ca`; the static/rolling scripts replace them. Historical fixed-horizon
-scores are not a controlled comparison with the new one-step forecasts.
+Historical v1 outputs have been removed from this branch. They remain available
+in Git history and on `feature/experiment-v1`.
 
 ## Official calendar data (historical experiment)
 
@@ -274,16 +209,15 @@ breaks ending that year are December 30, 2006–January 1 (3 days), February
 17–25 (9), April 5–8 (4), June 16–19 (4), and September 22–25 (4).
 
 The daily calendar, break intervals, and `data/processed_calendar` have been
-rebuilt. Only eight daily classifications and the three holiday-duration
+rebuilt. Only eight daily classifications and the two holiday-duration
 features for February, April, June, and September 2007 changed. All 112 break
 intervals and 234 monthly aggregates were verified against daily records.
-Original `data/processed`, `lasso.py`, and existing model reports/results are
-preserved. Historical reports using the three duration features reflect the
-old calendar and have not been rerun; the current OLS-aligned Lasso models
-use the original holiday count and are unaffected by this correction.
+Original `data/processed` and `lasso.py` are retained for reference. The v2
+default models use the original holiday count and are unaffected by this
+calendar correction.
 
-The original `lasso.py` reads `data/processed/merged_monthly.csv` and writes to
-`reports/lasso/`. Its data and reports remain separate from this experiment.
+The original `lasso.py` reads `data/processed/merged_monthly.csv`; it is not
+part of the v2 workflow.
 
 The new `build_official_holidays.py` downloads government office calendars from
 [DGPA historical work calendars](https://www.dgpa.gov.tw/informationlist?uid=30)
@@ -308,7 +242,7 @@ uv run --no-project python preprocessing.py --output-dir data/processed_calendar
 | `long_holiday_days_ended` | Full duration of every qualifying break that ends in the month, summed. |
 
 For a December 30–January 2 break, `started` adds 4 to December, `ended` adds
-4 to January. The static holiday experiment uses these two columns; the
+4 to January. The static and rolling holiday experiments use these two columns; the
 default static/rolling experiments use the original holiday count.
 
 `long_holiday_days_in_month` and its missingness indicator were removed from

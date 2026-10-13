@@ -54,7 +54,7 @@ def main():
     validation.to_csv(out / "alpha_validation_metrics.csv", index=False)
     selected = validation.apply(lambda row: row.alpha == settings[row.target]["alpha"], axis=1)
     validation.loc[selected].to_csv(out / "cv_metrics.csv", index=False)
-    save_results(out, "Static Lasso + Lag", targets, predicted, settings, coefficient_rows)
+    save_results(out, targets, predicted, settings, coefficient_rows)
 
 
 if __name__ == "__main__":
