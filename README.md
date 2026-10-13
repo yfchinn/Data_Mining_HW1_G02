@@ -56,7 +56,93 @@ git push origin main
 
 Repeat `git add` for additional files before committing. The final pull includes any updates your teammates pushed while you were working.
 
-## Lasso experiments aligned with OLS
+## Experiment v2: train on operating history
+
+On branch `experiment-v2`, `OLS_static_lag.py`, `OLS_rolling.py`,
+`lasso_static_lag.py`, and `lasso_rolling.py` share the operating-history rules
+in `station_history.py`. Run these same scripts to write **new** outputs under
+`results/experiment_v2/{ols_static_lag,ols_rolling,lasso_static_lag,lasso_rolling}/`.
+The original results and baseline `OLS.py` / `lasso.py` remain historical v1
+experiments; those two baseline scripts do not apply the new rules.
+
+- Use documented opening months from `preprocessing.OPENING_MONTHS`; stations
+  already operating at the dataset start use January 2007. Retain partial
+  opening months because the observations are monthly.
+- Mask pre-opening targets before computing lags and rolling means, retaining
+  the monthly index. Genuine zero observations after opening remain valid.
+- Keep the same ten features and July 2024–June 2026 test months. Twelve months
+  of operating history are needed before the first complete feature row.
+- Keep the four static CV date boundaries. Skip a target's fold if it has
+  fewer than 24 complete training rows or incomplete validation features.
+  This minimum is an experiment rule, not a guarantee of statistical adequacy.
+  Record every used/skipped fold and training dates in `fold_audit.csv`.
+- Nangang, Miaoli, Changhua, and Yunlin use folds 3 and 4. Other stations use
+  all four. Lasso selects alpha only across the target's eligible folds.
+- Rolling validation remains July 2022–June 2024. A candidate window must
+  have its full requested history for every target/month; it is not shortened
+  for younger stations. Candidates 36 and 60 pass; 120 is excluded because
+  late-opening stations lack that history. See `window_eligibility.csv`.
+  Each model chooses its common window by validation MAE on all 24 targets;
+  Lasso also selects alpha per target. Monthly coefficient reports include
+  the actual training start, end, and sample count.
+- Test remains one step ahead using previously observed monthly usage.
+
+Full-line monthly **entry** test results (24 months), saved in
+`results/experiment_v2/model_comparison.csv`:
+
+| Model | Selected rolling window | MAE | MAPE |
+| --- | ---: | ---: | ---: |
+| Static OLS + Lag | — | 346,424 | 5.031% |
+| Static Lasso + Lag | — | 357,798 | 5.159% |
+| Rolling OLS | 60 | 403,149 | 6.003% |
+| Rolling Lasso | 36 | 297,206 | 4.312% |
+| Seasonal naive (t-12) | — | 368,317 | 5.319% |
+
+Window choices are based on validation, not the test results. V2 changes both
+the eligible history and validation/window selection; its difference from v1
+cannot be attributed to removal of pre-opening zeros alone.
+
+### Static models with started and ended holiday days
+
+Run `uv run --no-project python static_holiday_experiment.py` to compare two
+holiday representations with v2 static OLS and Lasso. The holiday input is
+either `long_holiday_days_started` and `long_holiday_days_ended` in days, or
+`log1p` of those two columns. This experiment excludes both
+`long_holiday_count` (the former `long_holiday_days_in_month` column has been
+removed from the dataset), so the only holiday
+inputs are the two named columns. The other inputs are month index, month
+sine/cosine, days in month, and five target-history features (11 in total).
+
+Train/test months, operating-history rule, eligible static folds, and one-step
+evaluation match the v2 static baseline. Lasso chooses alpha per target and
+variant using only training-period validation folds. The report is
+`results/experiment_v2/static_holiday_comparison.csv`; accompanying station
+metrics, CV metrics, predictions, and coefficients have the same
+`static_holiday_` filename prefix in that directory.
+
+| Model | Holiday inputs | Mean station validation MAE | Total entry test MAE | Test MAPE |
+| --- | --- | ---: | ---: | ---: |
+| OLS | Baseline count | 54,341 | 346,424 | 5.031% |
+| OLS | Started + ended | 53,070 | 342,757 | 4.973% |
+| OLS | `log1p` of both | 54,123 | 357,601 | 5.183% |
+| Lasso | Baseline count | 44,254 | 357,798 | 5.159% |
+| Lasso | Started + ended | 43,668 | 347,630 | 5.021% |
+| Lasso | `log1p` of both | 43,852 | 365,686 | 5.266% |
+| Seasonal naive | Last year's month | — | 368,317 | 5.319% |
+
+The raw pair improves test MAE for 21/24 OLS and 22/24 Lasso station targets;
+it also improves full-line entry MAE against each corresponding v2 baseline.
+The log representation is worse on both validation and test overall. The
+calendar data are retrospective: revisions published after a forecast month
+would not have been known at that time.
+
+Run the history and leakage checks with:
+
+```bash
+uv run --no-project python -m unittest test_station_history
+```
+
+## Historical v1: Lasso experiments aligned with OLS
 
 Reference: `origin/feature/experiment-v1`, commit
 `960ab07b3e6d414bd44e830dcb90367994b0d929` (`OLS_static_lag.py`, `OLS_rolling.py`).
@@ -119,6 +205,29 @@ scores are not a controlled comparison with the new one-step forecasts.
 
 ## Official calendar data (historical experiment)
 
+### Audit of 2008–2011 and annual totals
+
+The monthly file counts **only runs of at least three consecutive days off**
+on the DGPA government-office calendar. The [2008 DGPA announcement](https://www.dgpa.gov.tw/information?pid=1395&uid=2)
+lists exactly three: February 6–11 (6 days), April 4–6 (3), and October 10–12
+(3). For 2009, the [original DGPA announcement](https://www.dgpa.gov.tw/information?pid=1353&uid=82)
+lists January 24–February 1 (9) and May 28–31 (4); a
+[later DGPA notice](https://www.dgpa.gov.tw/information?pid=2274&uid=82)
+confirms January 1–4 (4) was also a break. Thus January 2009 has
+`started=13` (4 + 9) and `ended=4`; February has `ended=9`.
+
+The XLS special-observance fill previously marked May 1, 2010, May 1, 2011,
+and September 3, 2011 as working days even though they were weekends. This is
+fixed in `data/official_holiday_days.csv`. They do not form or extend any
+three-day break, so `data/official_long_holiday_periods.csv` and the monthly
+holiday-duration features are unchanged. The parser now checks **every year's
+day-off total** against DGPA's
+[annual totals table](https://www.dgpa.gov.tw/FileConversion?filename=dgpa%2Ffiles%2F202506%2Fcbc12c92-ad33-4bf2-a96e-c5d36fbd23fa.doc&name=%E5%85%A8%E5%B9%B4%E6%94%BE%E5%81%87%E6%97%A5%E6%95%B8%E4%B8%80%E8%A6%BD%E8%A1%A8.doc&nfix=pdf).
+The corrected 2010/2011 totals are 112/115 days. `test_official_calendar.py`
+also verifies daily coverage, every maximal three-day break, and the 2008/2009
+date lists. The existing model predictions are unaffected by this daily-only
+correction.
+
 ### Calendar correction
 
 The 2007 XLS parser previously reversed the fills for adjusted days off (51)
@@ -161,11 +270,16 @@ uv run --no-project python preprocessing.py --output-dir data/processed_calendar
 | --- | --- |
 | `long_holiday_days_started` | Full duration of every qualifying break that starts in the month, summed. |
 | `long_holiday_days_ended` | Full duration of every qualifying break that ends in the month, summed. |
-| `long_holiday_days_in_month` | Days of qualifying breaks that actually fall in the month. |
 
 For a December 30–January 2 break, `started` adds 4 to December, `ended` adds
-4 to January, and `in_month` adds 2 to each month. The OLS-aligned Lasso
-experiments use the original holiday count, not these three columns.
+4 to January. The static holiday experiment uses these two columns; the
+default static/rolling experiments use the original holiday count.
+
+`long_holiday_days_in_month` and its missingness indicator were removed from
+the exported datasets, dictionary, and preprocessing metadata in experiment v2.
+Rebuilding the data now produces only the two duration columns above. The
+better two-column results also exclude the old holiday count, so that comparison
+does not isolate the effect of removing `in_month` alone.
 
 The office calendar is a proxy for passenger holidays, not the holiday schedule
 of every traveler. The test is retrospective: calendar revisions announced after

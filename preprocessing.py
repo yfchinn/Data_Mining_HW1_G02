@@ -85,14 +85,13 @@ DATASETS = {
     "gdp": ("平均每人GDP(元).csv", ["gdp_per_capita_nominal_twd"]),
     "holidays": ("連假次數-頭尾各計1.csv", ["long_holiday_count"]),
     "holiday_periods": ("official_long_holiday_periods.csv", [
-        "long_holiday_days_started", "long_holiday_days_ended", "long_holiday_days_in_month"]),
+        "long_holiday_days_started", "long_holiday_days_ended"]),
 }
 FEATURE_DEFINITIONS = {
     "gdp_per_capita_nominal_twd": "季度平均每人 GDP（名目值，元）；同季三個月使用相同原值，不除以 3，非月 GDP。供歷史分析；預測特徵須另依預測時點可得的公布資料與版本建立。",
     "long_holiday_count": "連假的開始與結束各計 1；跨月時分別計入所在月份。同月頭尾合計 2，保留來源原值，不除以 2；0 為有效計數。",
     "long_holiday_days_started": "本月開始之連續休假至少 3 天的假期，完整天數加總；跨月假期的完整天數也計在開始月。依政府行政機關辦公日曆表。",
     "long_holiday_days_ended": "本月結束之連續休假至少 3 天的假期，完整天數加總；跨月假期的完整天數也計在結束月。依政府行政機關辦公日曆表。",
-    "long_holiday_days_in_month": "連續休假至少 3 天之假期，落在本月的實際休假日數；跨月假期按月份拆開。依政府行政機關辦公日曆表。",
 }
 FLAG_COLUMNS = ["dataset", "date", "column", "value", "reason", "lower_bound", "upper_bound"]
 
@@ -271,10 +270,6 @@ def read_holiday_periods(path: Path, columns: list[str]) -> tuple[pd.DataFrame, 
             frame.loc[start_month, columns[0]] += days
         if end_month in frame.index:
             frame.loc[end_month, columns[1]] += days
-        for current in pd.date_range(start, end):
-            month = current.to_period("M").to_timestamp()
-            if month in frame.index:
-                frame.loc[month, columns[2]] += 1
         previous_end = end
     metadata = {
         "source_file": path.name,

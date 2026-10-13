@@ -23,6 +23,26 @@ ROOT = Path(__file__).resolve().parent
 BASE = "https://www.dgpa.gov.tw"
 PORTAL = "https://data.gov.tw/dataset/14718"
 CHINESE_MONTHS = "一二三四五六七八九十"
+# DGPA, "我國實施週休二日後政府行政機關全年放假日數一覽表".
+# The counts guard against losing ordinary weekends under a special-day fill.
+EXPECTED_DAY_OFF_COUNTS = {
+    2007: 114, 2008: 112, 2009: 110, 2010: 112, 2011: 115,
+    2012: 112, 2013: 115, 2014: 113, 2015: 116, 2016: 116,
+    2017: 116, 2018: 115, 2019: 115, 2020: 115, 2021: 116,
+    2022: 115, 2023: 116, 2024: 115, 2025: 118, 2026: 120,
+}
+
+
+def classify_calendar_day(fill: int, current: date, off: set[int],
+                          work: set[int], special: set[int]) -> bool:
+    """A special observance does not cancel an ordinary weekend."""
+    if fill in special:
+        return current.weekday() >= 5
+    if fill in off:
+        return True
+    if fill in work:
+        return False
+    raise ValueError(f"Unknown calendar fill {fill} on {current}")
 
 
 def fetch(url: str) -> bytes:
@@ -93,6 +113,8 @@ def parse_old_xls(raw: bytes, year: int) -> dict[date, bool]:
         2011: {11, 41}, 2012: {41, 43, 55},
         2013: {64}, 2014: {64}, 2015: {64}, 2016: {9, 64},
     }
+    special_fills = {year: ({55} if year == 2012 else {11})
+                     for year in range(2007, 2013)}
     # Palette indices change between workbooks. Check the actual legend so
     # adjusted holidays cannot silently be confused with makeup workdays.
     legend_labels = {
@@ -153,9 +175,9 @@ def parse_old_xls(raw: bytes, year: int) -> dict[date, bool]:
                     except ValueError:
                         continue
                     fill = book.xf_list[sheet.cell_xf_index(row, col)].background.pattern_colour_index
-                    if fill not in off_fills[year] | work_fills[year]:
-                        raise ValueError(f"Unknown fill {fill} on {current} in {year}")
-                    days[current] = fill in off_fills[year]
+                    days[current] = classify_calendar_day(
+                        fill, current, off_fills[year], work_fills[year],
+                        special_fills.get(year, set()))
     expected = {date(year, 1, 1) + timedelta(days=offset)
                 for offset in range((date(year + 1, 1, 1) - date(year, 1, 1)).days)}
     if set(days) != expected:
@@ -225,6 +247,12 @@ def main() -> None:
         days.update(parsed)
         sources[year] = url
         print(year, len(parsed), "CSV", url)
+    for year, expected in EXPECTED_DAY_OFF_COUNTS.items():
+        actual = sum(day_off for current, day_off in days.items()
+                     if current.year == year)
+        if actual != expected:
+            raise ValueError(f"Official annual day-off count mismatch for {year}: "
+                             f"{actual} vs {expected}")
     output = ROOT / "data"
     with (output / "official_holiday_days.csv").open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n")

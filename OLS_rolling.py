@@ -9,11 +9,12 @@
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from station_history import features_for_target, common_windows
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from model_data import load_model_data
 
-OUT = Path(__file__).resolve().parent / "results" / "ols_rolling"
+OUT = Path(__file__).resolve().parent / "results" / "experiment_v2" / "ols_rolling"
 WINDOWS = (36, 60, 120)
 VALIDATION_MONTHS = 24
 LAGS = (1, 3, 12)
@@ -32,16 +33,6 @@ def metrics(actual, predicted):
     }
 
 
-def features_for_target(calendar, target_series):
-    """lag 與 rolling_mean 都先 shift(1)，不會使用目標月份真實運量。"""
-    X = calendar.copy()
-    for lag in LAGS:
-        X[f"lag_{lag}"] = target_series.shift(lag)
-    X["rolling_mean_3"] = target_series.shift(1).rolling(3).mean()
-    X["rolling_mean_12"] = target_series.shift(1).rolling(12).mean()
-    return X
-
-
 def walk_forward(X, y, dates, window):
     """每月重新 fit；訓練僅使用當月以前、最近 window 筆可用樣本。"""
     rows, coef_rows = [], []
@@ -57,7 +48,10 @@ def walk_forward(X, y, dates, window):
         prediction = float(model.predict(X.loc[[date]])[0])
         rows.append({"date": date, "actual": float(y.loc[date]), "predicted": prediction})
         coef_rows.append({
-            "date": date, "intercept": float(model.intercept_),
+            "date": date, "n_train": len(history),
+            "train_start": history[0].strftime("%Y-%m"),
+            "train_end": history[-1].strftime("%Y-%m"),
+            "intercept": float(model.intercept_),
             **{name: float(value) for name, value in zip(X.columns, model.coef_)},
         })
     return pd.DataFrame(rows).set_index("date"), pd.DataFrame(coef_rows).set_index("date")
@@ -76,8 +70,10 @@ def main():
 
     # 對每個視窗，使用訓練期末端的 walk-forward 驗證，
     # 並以 24 個進出站目標的平均 MAE 選擇視窗。
+    windows, audit = common_windows(feature_cache, validation_dates, WINDOWS)
+    audit.to_csv(OUT / "window_eligibility.csv", index=False)
     validation_rows = []
-    for window in WINDOWS:
+    for window in windows:
         for target in targets.columns:
             predictions, _ = walk_forward(
                 feature_cache[target], targets[target], validation_dates, window
@@ -96,7 +92,7 @@ def main():
     print(f"訓練期間：{train_dates.min():%Y-%m} ～ {train_dates.max():%Y-%m}")
     print(f"視窗驗證：{validation_dates.min():%Y-%m} ～ {validation_dates.max():%Y-%m}")
     print(f"最終測試：{test_dates.min():%Y-%m} ～ {test_dates.max():%Y-%m}")
-    print(f"候選視窗：{WINDOWS} 個月；根據驗證集各站平均 MAE 選擇")
+    print(f"所有車站皆可使用的候選視窗：{windows} 個月；根據驗證集各站平均 MAE 選擇")
     print("\n【視窗驗證平均結果】")
     print(summary.round(3).to_string())
     print(f"\n選定視窗：{best_window} 個月")
@@ -108,7 +104,7 @@ def main():
             feature_cache[target], targets[target], test_dates, best_window
         )
         predictions_by_target[target] = predictions.predicted
-        station_rows.append({"target": target, **metrics(predictions.actual, predictions.predicted)})
+        station_rows.append({"target": target, "window_months": best_window, **metrics(predictions.actual, predictions.predicted)})
         for date, row in predictions.iterrows():
             prediction_rows.append({
                 "date": date.strftime("%Y-%m"), "target": target,

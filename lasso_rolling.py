@@ -1,9 +1,10 @@
 """Rolling Lasso matching OLS_rolling.py: ten features, monthly refits.
 
-Select a common 36/60/120-month window on the last 24 pre-test months, with
+Select an eligible common window on the last 24 pre-test months, with
 per-target alpha selected on that same validation period. Freeze both for test.
 """
 import pandas as pd
+from station_history import common_windows
 from lasso_features import (ALPHAS, ROOT, coefficients, load_experiment,
                             metrics, model_for, save_results)
 
@@ -20,17 +21,23 @@ def walk_forward(X, y, dates, window, alpha, keep_coefficients=False):
         predicted[date] = float(model.predict(X.loc[[date]])[0])
         if keep_coefficients:
             coefficient_rows.append({"date": date.strftime("%Y-%m"),
+                                     "n_train": len(history),
+                                     "train_start": history.index[0].strftime("%Y-%m"),
+                                     "train_end": history.index[-1].strftime("%Y-%m"),
                                      **coefficients(model, X.columns)})
     return pd.Series(predicted), coefficient_rows
 
 
 def main():
     data, targets, cache = load_experiment()
-    out = ROOT / "results" / "lasso_rolling"
+    out = ROOT / "results" / "experiment_v2" / "lasso_rolling"
     out.mkdir(parents=True, exist_ok=True)
     validation_dates = data.X_train.index[-24:]
+    windows, audit = common_windows(cache, validation_dates, WINDOWS)
+    audit.to_csv(out / "window_eligibility.csv", index=False)
+    print(f"Eligible common windows: {windows}", flush=True)
     rows = []
-    for window in WINDOWS:
+    for window in windows:
         print(f"Validating window={window}", flush=True)
         for target in targets:
             for alpha in ALPHAS:

@@ -8,11 +8,12 @@ are assumed available. No target-month or future actual is used as a feature.
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from station_history import features_for_target, fold_info
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from model_data import load_model_data, make_time_series_cv
 
-OUT = Path(__file__).resolve().parent / "results" / "ols_static_lag"
+OUT = Path(__file__).resolve().parent / "results" / "experiment_v2" / "ols_static_lag"
 LAGS = (1, 3, 12)
 
 
@@ -29,18 +30,10 @@ def metrics(actual, predicted):
     }
 
 
-def features_for_target(calendar, target_series):
-    X = calendar.copy()
-    for lag in LAGS:
-        X[f"lag_{lag}"] = target_series.shift(lag)
-    X["rolling_mean_3"] = target_series.shift(1).rolling(3).mean()
-    X["rolling_mean_12"] = target_series.shift(1).rolling(12).mean()
-    return X
-
-
 def main():
     data = load_model_data(test_months=24)
-    OUT.mkdir(parents=True, exist_ok=True)
+    out = OUT
+    out.mkdir(parents=True, exist_ok=True)
     calendar = pd.concat([data.X_train, data.X_test]).sort_index()
     targets = pd.concat([data.y_train, data.y_test]).sort_index()
     train_dates = data.X_train.index
@@ -49,6 +42,7 @@ def main():
 
     cv_rows, test_rows, prediction_rows, coefficient_rows = [], [], [], []
     predictions_by_target = pd.DataFrame(index=test_dates)
+    fold_audit = []
 
     for target in targets.columns:
         y = targets[target]
@@ -60,19 +54,20 @@ def main():
         if X_test.isna().any().any():
             raise ValueError(f"測試特徵存在缺失值：{target}")
 
-        # Fold boundaries match model_data.py; within each fold, remove only
-        # the first 12 unavailable lag rows (normally only in the first fold).
+        # Keep common dates; skip folds without sufficient operating history.
         for fold_no, (tr_idx, val_idx) in enumerate(folds, 1):
             fold_train_dates = train_dates[tr_idx]
             fold_val_dates = train_dates[val_idx]
             fold_train = X.loc[fold_train_dates].dropna()
             fold_val = X.loc[fold_val_dates]
-            if fold_val.isna().any().any():
-                raise ValueError("驗證月份的 Lag Features 不完整")
+            info = fold_info(target, fold_no, fold_train, fold_val)
+            fold_audit.append(info)
+            if info["status"] == "skipped":
+                continue
             model = LinearRegression().fit(fold_train, y.loc[fold_train.index])
             pred = model.predict(fold_val)
             cv_rows.append({
-                "target": target, "fold": fold_no,
+                **info,
                 "train_end": fold_train.index[-1].strftime("%Y-%m"),
                 "validation_start": fold_val.index[0].strftime("%Y-%m"),
                 "validation_end": fold_val.index[-1].strftime("%Y-%m"),
@@ -83,7 +78,11 @@ def main():
         model = LinearRegression().fit(X_train, y_train)
         predicted = model.predict(X_test)
         predictions_by_target[target] = predicted
-        test_rows.append({"target": target, **metrics(y.loc[test_dates], predicted)})
+        test_rows.append({"target": target, "n_train": len(X_train),
+                          "train_start": X_train.index[0].strftime("%Y-%m"),
+                          "train_end": X_train.index[-1].strftime("%Y-%m"),
+                          "n_validation_folds": sum(r["target"] == target and r["status"] == "used" for r in fold_audit),
+                          **metrics(y.loc[test_dates], predicted)})
         coefficient_rows.append({
             "target": target, "intercept": float(model.intercept_),
             **dict(zip(X_train.columns, model.coef_)),
@@ -95,12 +94,13 @@ def main():
                 "error": float(pred - actual),
             })
 
+    pd.DataFrame(fold_audit).to_csv(out / "fold_audit.csv", index=False)
     cv_df = pd.DataFrame(cv_rows)
     test_df = pd.DataFrame(test_rows)
-    cv_df.to_csv(OUT / "cv_metrics.csv", index=False, encoding="utf-8-sig")
-    test_df.to_csv(OUT / "test_metrics.csv", index=False, encoding="utf-8-sig")
-    pd.DataFrame(prediction_rows).to_csv(OUT / "test_predictions.csv", index=False, encoding="utf-8-sig")
-    pd.DataFrame(coefficient_rows).to_csv(OUT / "coefficients.csv", index=False, encoding="utf-8-sig")
+    cv_df.to_csv(out / "cv_metrics.csv", index=False, encoding="utf-8-sig")
+    test_df.to_csv(out / "test_metrics.csv", index=False, encoding="utf-8-sig")
+    pd.DataFrame(prediction_rows).to_csv(out / "test_predictions.csv", index=False, encoding="utf-8-sig")
+    pd.DataFrame(coefficient_rows).to_csv(out / "coefficients.csv", index=False, encoding="utf-8-sig")
 
     entry_cols = [c for c in targets if c.startswith("hsr_entry_")]
     actual_total = targets.loc[test_dates, entry_cols].sum(axis=1)
@@ -114,15 +114,15 @@ def main():
         "seasonal_naive_predicted": seasonal_total,
     })
     total_predictions.index.name = "date"
-    total_predictions.to_csv(OUT / "total_predictions.csv", encoding="utf-8-sig")
+    total_predictions.to_csv(out / "total_predictions.csv", encoding="utf-8-sig")
     comparison = pd.DataFrame([
         {"model": "Static OLS + Lag", **metrics(actual_total, static_total)},
         {"model": "Seasonal Naive (t-12)", **metrics(actual_total, seasonal_total)},
     ])
-    comparison.to_csv(OUT / "total_metrics_comparison.csv", index=False, encoding="utf-8-sig")
+    comparison.to_csv(out / "total_metrics_comparison.csv", index=False, encoding="utf-8-sig")
 
     print("【實驗設定】")
-    print(f"訓練期間：{train_dates.min():%Y-%m} ～ {train_dates.max():%Y-%m}（前 12 個月因 Lag 缺值不納入訓練）")
+    print(f"訓練期間：{train_dates.min():%Y-%m} ～ {train_dates.max():%Y-%m}（各站排除營運前資料及初始 12 個月歷史特徵缺值）")
     print(f"最終測試：{test_dates.min():%Y-%m} ～ {test_dates.max():%Y-%m}")
     print(f"特徵數量：{len(calendar.columns) + len(LAGS) + 2}；預測目標：{len(targets.columns)}")
     print("訓練方式：只訓練一次；測試期間不更新係數")
@@ -136,7 +136,7 @@ def main():
         "MAE": "{:,.0f}".format, "RMSE": "{:,.0f}".format,
         "R2": "{:.3f}".format, "MAPE_pct": "{:.2f}%".format,
     }))
-    print(f"\n結果已儲存至：{OUT}")
+    print(f"\n結果已儲存至：{out}")
 
 
 if __name__ == "__main__":

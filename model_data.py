@@ -36,7 +36,6 @@ FEATURE_COLUMNS = (
 HOLIDAY_FEATURE_COLUMNS = FEATURE_COLUMNS + (
     "long_holiday_days_started",
     "long_holiday_days_ended",
-    "long_holiday_days_in_month",
 )
 
 

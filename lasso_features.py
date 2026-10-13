@@ -5,6 +5,7 @@ Forecasts are one month ahead: prior test months' observed counts are available.
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from station_history import features_for_target
 from sklearn.linear_model import Lasso
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.pipeline import make_pipeline
@@ -13,15 +14,6 @@ from model_data import load_model_data
 
 ALPHAS = (1, 10, 100, 1000, 10000, 100000, 1000000)
 ROOT = Path(__file__).resolve().parent
-
-
-def features_for_target(calendar, target_series):
-    X = calendar.copy()
-    for lag in (1, 3, 12):
-        X[f"lag_{lag}"] = target_series.shift(lag)
-    X["rolling_mean_3"] = target_series.shift(1).rolling(3).mean()
-    X["rolling_mean_12"] = target_series.shift(1).rolling(12).mean()
-    return X
 
 
 def load_experiment():
