@@ -84,10 +84,15 @@ DATASETS = {
                       for station in STATIONS]),
     "gdp": ("平均每人GDP(元).csv", ["gdp_per_capita_nominal_twd"]),
     "holidays": ("連假次數-頭尾各計1.csv", ["long_holiday_count"]),
+    "holiday_periods": ("official_long_holiday_periods.csv", [
+        "long_holiday_days_started", "long_holiday_days_ended", "long_holiday_days_in_month"]),
 }
 FEATURE_DEFINITIONS = {
     "gdp_per_capita_nominal_twd": "季度平均每人 GDP（名目值，元）；同季三個月使用相同原值，不除以 3，非月 GDP。供歷史分析；預測特徵須另依預測時點可得的公布資料與版本建立。",
     "long_holiday_count": "連假的開始與結束各計 1；跨月時分別計入所在月份。同月頭尾合計 2，保留來源原值，不除以 2；0 為有效計數。",
+    "long_holiday_days_started": "本月開始之連續休假至少 3 天的假期，完整天數加總；跨月假期的完整天數也計在開始月。依政府行政機關辦公日曆表。",
+    "long_holiday_days_ended": "本月結束之連續休假至少 3 天的假期，完整天數加總；跨月假期的完整天數也計在結束月。依政府行政機關辦公日曆表。",
+    "long_holiday_days_in_month": "連續休假至少 3 天之假期，落在本月的實際休假日數；跨月假期按月份拆開。依政府行政機關辦公日曆表。",
 }
 FLAG_COLUMNS = ["dataset", "date", "column", "value", "reason", "lower_bound", "upper_bound"]
 
@@ -243,8 +248,50 @@ def read_holidays(path: Path, columns: list[str]) -> tuple[pd.DataFrame, dict]:
     })
 
 
+def read_holiday_periods(path: Path, columns: list[str]) -> tuple[pd.DataFrame, dict]:
+    """Aggregate DGPA consecutive breaks, keeping the old holiday count intact."""
+    period_rows = pd.read_csv(path, parse_dates=["start_date", "end_date"])
+    if list(period_rows.columns) != ["start_date", "end_date", "duration_days"]:
+        raise ValueError(f"Unexpected holiday period header in {path.name}")
+    index = pd.date_range(ANALYSIS_START, ANALYSIS_END, freq="MS", name="date")
+    frame = pd.DataFrame(0, index=index, columns=columns, dtype="int64")
+    previous_end = None
+    for row in period_rows.itertuples(index=False):
+        start, end, duration = row
+        if pd.isna(start) or pd.isna(end) or start > end:
+            raise ValueError(f"Invalid holiday period in {path.name}: {row}")
+        if previous_end is not None and start <= previous_end:
+            raise ValueError(f"Overlapping or unsorted holiday periods in {path.name}")
+        days = (end - start).days + 1
+        if days < 3 or duration != days:
+            raise ValueError(f"Invalid holiday duration in {path.name}: {row}")
+        start_month = start.to_period("M").to_timestamp()
+        end_month = end.to_period("M").to_timestamp()
+        if start_month in frame.index:
+            frame.loc[start_month, columns[0]] += days
+        if end_month in frame.index:
+            frame.loc[end_month, columns[1]] += days
+        for current in pd.date_range(start, end):
+            month = current.to_period("M").to_timestamp()
+            if month in frame.index:
+                frame.loc[month, columns[2]] += 1
+        previous_end = end
+    metadata = {
+        "source_file": path.name,
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "source_period_rows": len(period_rows),
+        "source_start": index.min().strftime("%Y-%m-%d"),
+        "source_end": index.max().strftime("%Y-%m-%d"),
+        "missing_months": [],
+        "columns": {column: FEATURE_DEFINITIONS[column] for column in columns},
+        "definition": "Consecutive DGPA office calendar days off, minimum 3 days.",
+    }
+    return frame, metadata
+
+
 def read_dataset(name: str, path: Path, columns: list[str]) -> tuple[pd.DataFrame, dict]:
-    reader = {"gdp": read_gdp, "holidays": read_holidays}.get(name, read_monthly)
+    reader = {"gdp": read_gdp, "holidays": read_holidays,
+              "holiday_periods": read_holiday_periods}.get(name, read_monthly)
     return reader(path, columns)
 
 
@@ -275,13 +322,13 @@ def inspect_quality(name: str, frame: pd.DataFrame, metadata: dict) -> tuple[lis
         invalid = series.notna() & (~finite | (series < 0))
         if column.endswith("_pct"):
             invalid |= series > 100
-        if column == "long_holiday_count":
+        if column == "long_holiday_count" or column.startswith("long_holiday_days_"):
             invalid |= finite & series.where(finite).mod(1).ne(0)
         for date in series.index[invalid]:
             flags.append({"dataset": name, "date": date, "column": column,
                           "value": series.loc[date], "reason": "invalid_range",
                           "lower_bound": 0, "upper_bound": 100 if column.endswith("_pct") else None})
-        if column == "long_holiday_count":
+        if column == "long_holiday_count" or column.startswith("long_holiday_days_"):
             continue  # Calendar counts are validated, not statistical outliers.
         valid = series.where(~invalid)
         grouped = valid.groupby(valid.index.month)
@@ -476,7 +523,8 @@ def run(input_dir: Path, output_dir: Path) -> dict:
     merged = merged.join(tables["bus"], how="left", validate="one_to_one")
     merged = merged.join(tables["gdp"], how="left", validate="one_to_one")
     merged = merged.join(tables["holidays"], how="left", validate="one_to_one")
-    for name in ["hsr_service", "hsr_stations", "bus", "gdp", "holidays"]:
+    merged = merged.join(tables["holiday_periods"], how="left", validate="one_to_one")
+    for name in ["hsr_service", "hsr_stations", "bus", "gdp", "holidays", "holiday_periods"]:
         absent = merged.index.difference(tables[name].index)
         for date in absent:
             reason = "outside_source_coverage"
