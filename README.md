@@ -56,7 +56,86 @@ git push origin main
 
 Repeat `git add` for additional files before committing. The final pull includes any updates your teammates pushed while you were working.
 
-## Lasso experiment: official calendar and 24-month lag
+## Lasso experiments aligned with OLS
+
+Reference: `origin/feature/experiment-v1`, commit
+`960ab07b3e6d414bd44e830dcb90367994b0d929` (`OLS_static_lag.py`, `OLS_rolling.py`).
+The processed monthly data is identical on both branches.
+
+```bash
+uv pip install -r requirements.txt
+uv run --no-project python lasso_static_lag.py
+uv run --no-project python lasso_rolling.py
+```
+
+Both use ten features: `month_index`, `month_sin`, `month_cos`, `days_in_month`,
+`long_holiday_count`, the target's `lag_1`, `lag_3`, `lag_12`, and means of its
+previous 3 and 12 months. Rolling means are shifted before aggregation.
+`lasso_features.py` shares feature generation, metrics and reporting.
+
+These are **one-month-ahead evaluations**: actual usage of preceding months
+is available at each forecast date. Test dates are July 2024–June 2026.
+No current-month or future target is used in features, fitting, scaling or tuning.
+
+| Script | Fitting and validation | Reports |
+| --- | --- | --- |
+| `lasso_static_lag.py` | Four expanding folds of 24 months, using OLS fold boundaries. Choose each target's alpha by mean validation MAE, then fit once through June 2024. Update lag features with observed history during test, keeping coefficients fixed. | `results/lasso_static_lag/` |
+| `lasso_rolling.py` | Monthly refits on the latest 36/60/120 available training months. Validate on July 2022–June 2024; choose alpha per target/window, then choose one common window by average station MAE. Freeze the window and alphas for test. | `results/lasso_rolling/` |
+
+Alpha candidates are `1, 10, 100, 1000, 10000, 100000, 1000000`.
+Each fit uses `StandardScaler` fitted only on its own training rows.
+Reported coefficients are converted back to original feature units.
+Validation scores are used for parameter selection, rather than providing an
+independent estimate of the selected model's generalization error.
+MAE, RMSE, R2 and MAPE definitions match OLS (MAPE excludes zero actuals).
+Total comparison sums entry predictions only and uses the same t-12 baseline.
+Monthly availability of observed usage is assumed, as in OLS.
+
+Total monthly entry results on the same 24 test months are saved in
+`results/lasso_ols_comparison.csv`. Rolling Lasso selects a 120-month window,
+the same as the reference OLS run.
+
+| Model | MAE (persons/month) | RMSE | MAPE |
+| --- | ---: | ---: | ---: |
+| Static OLS + Lag | 342,157 | 400,706 | 4.974% |
+| Static Lasso + Lag | 341,364 | 408,066 | 4.941% |
+| Rolling OLS | 357,708 | 409,961 | 5.242% |
+| Rolling Lasso | 352,912 | 409,957 | 5.140% |
+| Seasonal naive (t-12) | 368,317 | 445,376 | 5.319% |
+
+Lasso improves MAE/MAPE slightly; static Lasso has worse RMSE than static OLS.
+These results do not establish a large or statistically significant advantage.
+
+Known limitation: these runs retain pre-opening station zeros, matching the
+reference OLS experiments. Early static validation folds have insufficient
+post-opening history for Nangang, Miaoli, Changhua, and Yunlin. Excluding
+pre-opening rows and skipping folds with insufficient valid history has been
+discussed but is not implemented in these results.
+
+The original `lasso.py` remains unchanged. Historical lag-only and holiday
+experiment reports remain in `reports/`. Their scripts are available at commit
+`2a0c3ca`; the static/rolling scripts replace them. Historical fixed-horizon
+scores are not a controlled comparison with the new one-step forecasts.
+
+## Official calendar data (historical experiment)
+
+### Calendar correction
+
+The 2007 XLS parser previously reversed the fills for adjusted days off (51)
+and makeup workdays (43). These are now corrected against the legend and
+footnotes in the [official 2007 calendar](https://www.dgpa.gov.tw/information?pid=4970&uid=30).
+All 2007–2016 XLS legends are now checked during parsing. The corrected 2007
+breaks ending that year are December 30, 2006–January 1 (3 days), February
+17–25 (9), April 5–8 (4), June 16–19 (4), and September 22–25 (4).
+
+The daily calendar, break intervals, and `data/processed_calendar` have been
+rebuilt. Only eight daily classifications and the three holiday-duration
+features for February, April, June, and September 2007 changed. All 112 break
+intervals and 234 monthly aggregates were verified against daily records.
+Original `data/processed`, `lasso.py`, and existing model reports/results are
+preserved. Historical reports using the three duration features reflect the
+old calendar and have not been rerun; the current OLS-aligned Lasso models
+use the original holiday count and are unaffected by this correction.
 
 The original `lasso.py` reads `data/processed/merged_monthly.csv` and writes to
 `reports/lasso/`. Its data and reports remain separate from this experiment.
@@ -74,9 +153,6 @@ when refreshing those files, inspect any changes to their styles.
 uv pip install -r requirements.txt
 uv run --no-project python build_official_holidays.py
 uv run --no-project python preprocessing.py --output-dir data/processed_calendar
-uv run --no-project python lasso_lag24.py
-uv run --no-project python lasso_lag24_only.py
-uv run --no-project python lasso_lag12.py
 ```
 
 `preprocessing.py` retains `long_holiday_count` from the original CSV and adds:
@@ -88,20 +164,8 @@ uv run --no-project python lasso_lag12.py
 | `long_holiday_days_in_month` | Days of qualifying breaks that actually fall in the month. |
 
 For a December 30–January 2 break, `started` adds 4 to December, `ended` adds
-4 to January, and `in_month` adds 2 to each month. The new Lasso adds each
-station's own monthly usage from 24 months earlier. It discards the first 24
-training months, uses three expanding 24-month validation folds, and holds out
-July 2024–June 2026 as test data. The lag for every test month comes from before
-the test period. Metrics and predictions go to `reports/lasso_lag24/`.
-`lasso_lag24_only.py` uses the original five features plus the same lag, without
-the new holiday-duration columns. It reads the original processed data and
-writes to `reports/lasso_lag24_only/`. Both lag experiments use the same split
-and validation folds.
-`lasso_lag12.py` uses the original five features plus a 12-month station lag.
-It keeps the same 24-month validation and test windows. For months 13–24 in
-each window, the lag comes from the model's earlier predictions in that window;
-actual validation/test targets are never used as inputs. Its output is in
-`reports/lasso_lag12_recursive/`.
+4 to January, and `in_month` adds 2 to each month. The OLS-aligned Lasso
+experiments use the original holiday count, not these three columns.
 
 The office calendar is a proxy for passenger holidays, not the holiday schedule
 of every traveler. The test is retrospective: calendar revisions announced after

@@ -215,8 +215,8 @@
     },
     "holiday_periods": {
       "source_file": "official_long_holiday_periods.csv",
-      "sha256": "a438bdc49b2553f5f7f53f76795ccbb078e3f30310ce1b48e6d21c2161078b37",
-      "source_period_rows": 109,
+      "sha256": "3d3b1d23c01b4ae1fe718103232704b68d6772543eebff6111ec3e119a52fa81",
+      "source_period_rows": 112,
       "source_start": "2007-01-01",
       "source_end": "2026-06-01",
       "missing_months": [],

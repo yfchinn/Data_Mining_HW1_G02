@@ -82,17 +82,41 @@ def parse_old_xls(raw: bytes, year: int) -> dict[date, bool]:
     # two rows: Gregorian day above lunar day. Cell fill 42=work, 45=weekend,
     # 44/46=holiday or substitute day in the oldest DGPA template.
     off_fills = {
-        2007: {43, 44, 45, 46}, 2008: {44, 45, 46},
+        2007: {44, 45, 46, 51}, 2008: {44, 45, 46},
         2009: {13, 15, 45, 46}, 2010: {40, 43, 45, 46},
         2011: {40, 45, 46}, 2012: {40, 45, 50, 52},
         2013: {45}, 2014: {45}, 2015: {45}, 2016: {45},
     }
     work_fills = {
-        2007: {11, 42, 51}, 2008: {11, 42},
+        2007: {11, 42, 43}, 2008: {11, 42},
         2009: {11, 41, 53}, 2010: {11, 41, 52},
         2011: {11, 41}, 2012: {41, 43, 55},
         2013: {64}, 2014: {64}, 2015: {64}, 2016: {9, 64},
     }
+    # Palette indices change between workbooks. Check the actual legend so
+    # adjusted holidays cannot silently be confused with makeup workdays.
+    legend_labels = {
+        "星期六、星期日": True, "放假之紀念日及民俗節日": True,
+        "放假之節日": True, "放假之紀念日及節日": True,
+        "補假": True, "調整放假": True, "調整放假日": True,
+        "特定節日": False, "補行上班": False, "補行上班日": False,
+        "上班日": False, "放假日": True, "workday": False, "dayoff": True,
+    }
+    checked = 0
+    for row in range(sheet.nrows):
+        for col in range(sheet.ncols):
+            label = str(sheet.cell_value(row, col)).strip()
+            if label not in legend_labels:
+                continue
+            swatch_col = col - (1 if year <= 2012 else 2)
+            fill = book.xf_list[sheet.cell_xf_index(row, swatch_col)].background.pattern_colour_index
+            expected_fills = off_fills[year] if legend_labels[label] else work_fills[year]
+            if fill not in expected_fills:
+                raise ValueError(f"Calendar legend mismatch for {year}: {label} has fill {fill}")
+            checked += 1
+    if checked < 2:
+        raise ValueError(f"Cannot verify work/off legend for {year}")
+
     month_names = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6,
                    "七": 7, "八": 8, "九": 9, "十": 10, "十一": 11, "十二": 12}
     headers = []
