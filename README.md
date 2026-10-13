@@ -102,39 +102,75 @@ Window choices are based on validation, not the test results. V2 changes both
 the eligible history and validation/window selection; its difference from v1
 cannot be attributed to removal of pre-opening zeros alone.
 
-### Static models with started and ended holiday days
+### Static and rolling holiday experiments
 
-Run `uv run --no-project python static_holiday_experiment.py` to compare two
-holiday representations with v2 static OLS and Lasso. The holiday input is
-either `long_holiday_days_started` and `long_holiday_days_ended` in days, or
-`log1p` of those two columns. This experiment excludes both
-`long_holiday_count` (the former `long_holiday_days_in_month` column has been
-removed from the dataset), so the only holiday
-inputs are the two named columns. The other inputs are month index, month
-sine/cosine, days in month, and five target-history features (11 in total).
+Run `uv run --no-project python static_holiday_experiment.py` to compare raw
+holiday durations and raw-plus-log features with v2 static and rolling OLS
+and Lasso. The script keeps its original filename and report prefix.
 
-Train/test months, operating-history rule, eligible static folds, and one-step
-evaluation match the v2 static baseline. Lasso chooses alpha per target and
-variant using only training-period validation folds. The report is
-`results/experiment_v2/static_holiday_comparison.csv`; accompanying station
-metrics, CV metrics, predictions, and coefficients have the same
-`static_holiday_` filename prefix in that directory.
+- `raw`: `long_holiday_days_started` and `long_holiday_days_ended`.
+- `raw_log1p`: both raw columns **plus** a separate `log1p` column for each.
+  `log1p(0) = 0`, so months without qualifying holidays remain valid.
+- Both omit `long_holiday_count`. The former `long_holiday_days_in_month` was
+  removed from the dataset. Other features are month index, month sine/cosine,
+  days in month, and five target-history features (11 inputs for raw, 13 for
+  raw-plus-log).
 
-| Model | Holiday inputs | Mean station validation MAE | Total entry test MAE | Test MAPE |
-| --- | --- | ---: | ---: | ---: |
-| OLS | Baseline count | 54,341 | 346,424 | 5.031% |
-| OLS | Started + ended | 53,070 | 342,757 | 4.973% |
-| OLS | `log1p` of both | 54,123 | 357,601 | 5.183% |
-| Lasso | Baseline count | 44,254 | 357,798 | 5.159% |
-| Lasso | Started + ended | 43,668 | 347,630 | 5.021% |
-| Lasso | `log1p` of both | 43,852 | 365,686 | 5.266% |
-| Seasonal naive | Last year's month | — | 368,317 | 5.319% |
+Static runs use the same eligible folds and opening-date rule as the v2
+baseline; coefficients remain fixed throughout the test period. Rolling runs
+validate 36/60-month windows on July 2022–June 2024 (120 is ineligible for
+late-opening stations), then refit monthly in test. Each model/variant chooses
+one common window by mean station validation MAE; Lasso selects alpha per
+target/window. Window and alpha choices are frozen before test evaluation.
+All experiments forecast one month ahead on July 2024–June 2026 using previously
+observed usage.
 
-The raw pair improves test MAE for 21/24 OLS and 22/24 Lasso station targets;
-it also improves full-line entry MAE against each corresponding v2 baseline.
-The log representation is worse on both validation and test overall. The
-calendar data are retrospective: revisions published after a forecast month
-would not have been known at that time.
+The consolidated report is `results/experiment_v2/static_holiday_comparison.csv`.
+It now contains **both static and rolling** results, their corresponding v2
+baselines, and seasonal naive (t-12). Positive
+`mae_improvement_vs_baseline_pct` means lower test MAE than the same method/model
+with the original holiday count. The `static_holiday_` station metrics, CV
+metrics, predictions, and coefficient files are overwritten together and
+include a `method` column. These replace the earlier log-only experiment;
+static raw results are retained as a reference by rerunning them.
+
+Full-line monthly entry test results (MAE in persons/month):
+
+| Method/model | Holiday inputs | Window | MAE | MAPE | MAE improvement vs own v2 baseline |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Static OLS | Baseline count | — | 346,424 | 5.031% | — |
+| Static OLS | Raw pair | — | 342,757 | 4.973% | 1.06% |
+| Static OLS | Raw pair + log1p pair | — | 335,782 | 4.871% | 3.07% |
+| Static Lasso | Baseline count | — | 357,798 | 5.159% | — |
+| Static Lasso | Raw pair | — | 347,630 | 5.021% | 2.84% |
+| Static Lasso | Raw pair + log1p pair | — | 346,760 | 5.007% | 3.09% |
+| Rolling OLS | Baseline count | 60 | 403,149 | 6.003% | — |
+| Rolling OLS | Raw pair | 60 | 395,402 | 5.897% | 1.92% |
+| Rolling OLS | Raw pair + log1p pair | 60 | 402,401 | 5.994% | 0.19% |
+| Rolling Lasso | Baseline count | 36 | 297,206 | 4.312% | — |
+| Rolling Lasso | Raw pair | 36 | 296,902 | 4.306% | 0.10% |
+| Rolling Lasso | Raw pair + log1p pair | 36 | 297,806 | 4.321% | -0.20% |
+| Seasonal naive | Last year's month | — | 368,317 | 5.319% | — |
+
+The static raw-plus-log variant improves both validation and test MAE compared
+with the raw pair. Rolling Lasso's raw-pair improvement over baseline is very
+small. Rolling OLS's holiday variants remain worse than seasonal naive on test;
+their validation MAE also exceeds the OLS baseline's validation MAE.
+
+CV scores are parameter-selection scores rather than independent estimates of
+the selected model's performance. Comparisons with the v2 baseline change
+holiday representation and may change rolling window and Lasso alpha. Calendar
+data are retrospective: revisions published after a forecast month would not
+have been known at that time.
+
+Run `uv run --no-project python summarize_station_results.py` to compare
+per-station entry and exit errors against each model and the seasonal naive
+forecast (previous year's same month). The generated
+`results/experiment_v2/station_method_report.md` includes each station's MAPE;
+`station_method_comparison.csv` contains MAE, RMSE, R², and MAPE for every
+target and setting; `station_method_summary.csv` averages each metric equally
+over the 24 entry/exit targets. These station averages are different from the
+full-line entry totals above.
 
 Run the history and leakage checks with:
 
