@@ -1,0 +1,117 @@
+"""Static OLS + lag features for monthly HSR station demand.
+
+Run from the repository root: python OLS_static_lag.py
+Uses the same features as OLS_rolling.py, but fits coefficients only once.
+Evaluation is one-step-ahead: at each month, prior months' observed counts
+are assumed available. No target-month or future actual is used as a feature.
+"""
+from pathlib import Path
+import numpy as np
+import pandas as pd
+from station_history import features_for_target, fold_info
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from model_data import load_model_data, make_time_series_cv
+
+OUT = Path(__file__).resolve().parent / "results" / "experiment_v2" / "ols_static_lag"
+LAGS = (1, 3, 12)
+
+
+def metrics(actual, predicted):
+    a = np.asarray(actual, dtype=float)
+    p = np.asarray(predicted, dtype=float)
+    nonzero = a != 0
+    return {
+        "MAE": float(mean_absolute_error(a, p)),
+        "RMSE": float(np.sqrt(mean_squared_error(a, p))),
+        "R2": float(r2_score(a, p)),
+        "MAPE_pct": float(np.mean(np.abs((a[nonzero] - p[nonzero]) / a[nonzero])) * 100)
+        if nonzero.any() else np.nan,
+    }
+
+
+def main():
+    data = load_model_data(test_months=24)
+    out = OUT
+    out.mkdir(parents=True, exist_ok=True)
+    calendar = pd.concat([data.X_train, data.X_test]).sort_index()
+    targets = pd.concat([data.y_train, data.y_test]).sort_index()
+    train_dates = data.X_train.index
+    test_dates = data.X_test.index
+    folds = list(make_time_series_cv(data, n_splits=4, validation_months=24).split(data.X_train))
+
+    cv_rows, test_rows, prediction_rows, coefficient_rows = [], [], [], []
+    fold_audit = []
+
+    for target in targets.columns:
+        y = targets[target]
+        X = features_for_target(calendar, y)
+        valid_train = X.loc[train_dates].notna().all(axis=1)
+        X_train = X.loc[train_dates][valid_train]
+        y_train = y.loc[X_train.index]
+        X_test = X.loc[test_dates]
+        if X_test.isna().any().any():
+            raise ValueError(f"測試特徵存在缺失值：{target}")
+
+        # Keep common dates; skip folds without sufficient operating history.
+        for fold_no, (tr_idx, val_idx) in enumerate(folds, 1):
+            fold_train_dates = train_dates[tr_idx]
+            fold_val_dates = train_dates[val_idx]
+            fold_train = X.loc[fold_train_dates].dropna()
+            fold_val = X.loc[fold_val_dates]
+            info = fold_info(target, fold_no, fold_train, fold_val)
+            fold_audit.append(info)
+            if info["status"] == "skipped":
+                continue
+            model = LinearRegression().fit(fold_train, y.loc[fold_train.index])
+            pred = model.predict(fold_val)
+            cv_rows.append({
+                **info,
+                "train_end": fold_train.index[-1].strftime("%Y-%m"),
+                "validation_start": fold_val.index[0].strftime("%Y-%m"),
+                "validation_end": fold_val.index[-1].strftime("%Y-%m"),
+                **metrics(y.loc[fold_val.index], pred),
+            })
+
+        # Static fit: train once through 2024-06; no refitting during test.
+        model = LinearRegression().fit(X_train, y_train)
+        predicted = model.predict(X_test)
+        test_rows.append({"target": target, "n_train": len(X_train),
+                          "train_start": X_train.index[0].strftime("%Y-%m"),
+                          "train_end": X_train.index[-1].strftime("%Y-%m"),
+                          "n_validation_folds": sum(r["target"] == target and r["status"] == "used" for r in fold_audit),
+                          **metrics(y.loc[test_dates], predicted)})
+        coefficient_rows.append({
+            "target": target, "intercept": float(model.intercept_),
+            **dict(zip(X_train.columns, model.coef_)),
+        })
+        for date, actual, pred in zip(test_dates, y.loc[test_dates], predicted):
+            prediction_rows.append({
+                "date": date.strftime("%Y-%m"), "target": target,
+                "actual": float(actual), "predicted": float(pred),
+                "error": float(pred - actual),
+            })
+
+    pd.DataFrame(fold_audit).to_csv(out / "fold_audit.csv", index=False)
+    cv_df = pd.DataFrame(cv_rows)
+    test_df = pd.DataFrame(test_rows)
+    cv_df.to_csv(out / "cv_metrics.csv", index=False, encoding="utf-8-sig")
+    test_df.to_csv(out / "test_metrics.csv", index=False, encoding="utf-8-sig")
+    pd.DataFrame(prediction_rows).to_csv(out / "test_predictions.csv", index=False, encoding="utf-8-sig")
+    pd.DataFrame(coefficient_rows).to_csv(out / "coefficients.csv", index=False, encoding="utf-8-sig")
+
+    print("【實驗設定】")
+    print(f"訓練期間：{train_dates.min():%Y-%m} ～ {train_dates.max():%Y-%m}（各站排除營運前資料及初始 12 個月歷史特徵缺值）")
+    print(f"最終測試：{test_dates.min():%Y-%m} ～ {test_dates.max():%Y-%m}")
+    print(f"特徵數量：{len(calendar.columns) + len(LAGS) + 2}；預測目標：{len(targets.columns)}")
+    print("訓練方式：只訓練一次；測試期間不更新係數")
+    print("預測方式：逐月單步預測，使用已觀測的歷史真實運量建立 Lag Features")
+    print("\n【各站進出站：交叉驗證平均指標】")
+    print(cv_df[["MAE", "RMSE", "R2", "MAPE_pct"]].mean().round(3).to_string())
+    print("\n【各站進出站：測試集平均指標】")
+    print(test_df[["MAE", "RMSE", "R2", "MAPE_pct"]].mean().round(3).to_string())
+    print(f"\n結果已儲存至：{out}")
+
+
+if __name__ == "__main__":
+    main()

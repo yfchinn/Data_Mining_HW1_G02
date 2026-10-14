@@ -55,3 +55,241 @@ git push origin main
 ```
 
 Repeat `git add` for additional files before committing. The final pull includes any updates your teammates pushed while you were working.
+
+## Experiment v2: train on operating history
+
+### Quick reproduction
+
+From the repository root, use the committed processed data and run the scripts
+in this order. Install [uv](https://docs.astral.sh/uv/) first. The `test` line
+creates `.venv` only if it does not exist.
+
+```bash
+git switch experiment-v2
+git pull --ff-only origin experiment-v2
+test -d .venv || uv venv
+uv pip install -r requirements.txt
+
+uv run --no-project python OLS_static_lag.py
+uv run --no-project python lasso_static_lag.py
+uv run --no-project python OLS_rolling.py
+uv run --no-project python lasso_rolling.py
+uv run --no-project python static_holiday_experiment.py
+uv run --no-project python summarize_station_results.py
+```
+
+The first four scripts fit the v2 baseline models. The fifth fits both holiday
+variants for static and rolling OLS/Lasso. The last combines their station-level
+test metrics with the previous-year-same-month (`t-12`) reference. Read
+`results/experiment_v2/station_method_report.md` for the comparison;
+`station_method_summary.csv` contains the equal-weight average across 24
+targets, and `station_method_comparison.csv` contains every target's metrics.
+The test period is July 2024–June 2026 (24 months). No calendar rebuild is
+needed because both processed input files are committed.
+
+### Targets and features
+
+Each model predicts the monthly `hsr_entry_*` or `hsr_exit_*` count for one of
+12 stations, giving 24 separate targets. All variants share these **nine**
+features:
+
+| Group | Exact feature columns | Meaning |
+| --- | --- | --- |
+| Calendar (4) | `month_index`, `month_sin`, `month_cos`, `days_in_month` | Time trend, annual cycle, and month length. `month_index` is calculated from `date`. |
+| Target history (5) | `lag_1`, `lag_3`, `lag_12`, `rolling_mean_3`, `rolling_mean_12` | The target station/direction's observed counts 1, 3, and 12 months earlier; means of the preceding 3 and 12 months. |
+
+| Variant | Additional feature columns | Total | Input data |
+| --- | --- | ---: | --- |
+| Baseline (four model scripts) | `long_holiday_count` | 10 | `data/processed/merged_monthly.csv` |
+| Holiday `raw` | `long_holiday_days_started`, `long_holiday_days_ended` | 11 | `data/processed_calendar/merged_monthly.csv` |
+| Holiday `raw_log1p` | The two `raw` columns **plus** `long_holiday_days_started_log1p`, `long_holiday_days_ended_log1p` | 13 | `data/processed_calendar/merged_monthly.csv` |
+
+`raw` and `raw_log1p` exclude `long_holiday_count`. The `t-12` reference uses
+only the same station/direction's observed count from the previous year's
+month; it is not a fitted regression model. Lag and rolling features use only
+observations before the forecast month, including previously observed test
+months in this one-month-ahead evaluation. See `station_history.py` for
+opening-date masking.
+
+### Validation and results
+
+On branch `experiment-v2`, `OLS_static_lag.py`, `OLS_rolling.py`,
+`lasso_static_lag.py`, and `lasso_rolling.py` share the operating-history rules
+in `station_history.py`. Run these same scripts to write **new** outputs under
+`results/experiment_v2/{ols_static_lag,ols_rolling,lasso_static_lag,lasso_rolling}/`.
+The original `OLS.py` / `lasso.py` are historical scripts and do not apply
+these operating-history rules.
+
+- Use documented opening months from `preprocessing.OPENING_MONTHS`; stations
+  already operating at the dataset start use January 2007. Retain partial
+  opening months because the observations are monthly.
+- Mask pre-opening targets before computing lags and rolling means, retaining
+  the monthly index. Genuine zero observations after opening remain valid.
+- Keep the same ten features and July 2024–June 2026 test months. Twelve months
+  of operating history are needed before the first complete feature row.
+- Keep the four static CV date boundaries. Skip a target's fold if it has
+  fewer than 24 complete training rows or incomplete validation features.
+  This minimum is an experiment rule, not a guarantee of statistical adequacy.
+  Record every used/skipped fold and training dates in `fold_audit.csv`.
+- Nangang, Miaoli, Changhua, and Yunlin use folds 3 and 4. Other stations use
+  all four. Lasso selects alpha only across the target's eligible folds.
+- Rolling validation remains July 2022–June 2024. A candidate window must
+  have its full requested history for every target/month; it is not shortened
+  for younger stations. Candidates 36 and 60 pass; 120 is excluded because
+  late-opening stations lack that history. See `window_eligibility.csv`.
+  Each model chooses its common window by validation MAE on all 24 targets;
+  Lasso also selects alpha per target. Monthly coefficient reports include
+  the actual training start, end, and sample count.
+- Test remains one step ahead using previously observed monthly usage.
+
+Window choices are based on validation, not the test results. V2 changes both
+the eligible history and validation/window selection; its difference from v1
+cannot be attributed to removal of pre-opening zeros alone.
+
+### Static and rolling holiday experiments
+
+Run `uv run --no-project python static_holiday_experiment.py` to compare raw
+holiday durations and raw-plus-log features with v2 static and rolling OLS
+and Lasso. The script keeps its original filename and report prefix.
+
+- `raw`: `long_holiday_days_started` and `long_holiday_days_ended`.
+- `raw_log1p`: both raw columns **plus** a separate `log1p` column for each.
+  `log1p(0) = 0`, so months without qualifying holidays remain valid.
+- Both omit `long_holiday_count`. The former `long_holiday_days_in_month` was
+  removed from the dataset. Other features are month index, month sine/cosine,
+  days in month, and five target-history features (11 inputs for raw, 13 for
+  raw-plus-log).
+
+Static runs use the same eligible folds and opening-date rule as the v2
+baseline; coefficients remain fixed throughout the test period. Rolling runs
+validate 36/60-month windows on July 2022–June 2024 (120 is ineligible for
+late-opening stations), then refit monthly in test. Each model/variant chooses
+one common window by mean station validation MAE; Lasso selects alpha per
+target/window. Window and alpha choices are frozen before test evaluation.
+All experiments forecast one month ahead on July 2024–June 2026 using previously
+observed usage.
+
+The `static_holiday_` station metrics, CV metrics, predictions, and coefficient
+files are overwritten together and include a `method` column. The earlier
+log-only experiment was replaced; static raw results are retained by rerunning
+them.
+
+CV scores are parameter-selection scores rather than independent estimates of
+the selected model's performance. Comparisons with the v2 baseline change
+holiday representation and may change rolling window and Lasso alpha. Calendar
+data are retrospective: revisions published after a forecast month would not
+have been known at that time.
+
+Run `uv run --no-project python summarize_station_results.py` after the four
+baseline scripts and `static_holiday_experiment.py` to compare
+per-station entry and exit errors against each model and the seasonal naive
+forecast (previous year's same month). The generated
+`results/experiment_v2/station_method_report.md` includes each station's MAPE;
+`station_method_comparison.csv` contains MAE, RMSE, R², and MAPE for every
+target and setting; `station_method_summary.csv` averages each metric equally
+over the 24 entry/exit targets. Positive
+`mae_improvement_vs_seasonal_pct` means lower per-target MAE than the same
+station's previous-year-same-month forecast.
+
+| Setting | Equal-weight MAE (persons) | Equal-weight MAPE |
+| --- | ---: | ---: |
+| Seasonal naive (t-12) | 36,318 | 7.42% |
+| Static OLS, baseline / raw / raw + log1p | 33,481 / 32,419 / 31,985 | 6.29% / 6.06% / 5.93% |
+| Static Lasso, baseline / raw / raw + log1p | 34,229 / 32,598 / 32,798 | 7.18% / 6.37% / 6.39% |
+| Rolling OLS, baseline / raw / raw + log1p | 39,704 / 37,301 / 37,983 | 7.25% / 6.89% / 7.06% |
+| Rolling Lasso, baseline / raw / raw + log1p | 28,455 / 28,276 / 28,352 | 5.50% / 5.42% / 5.43% |
+
+These values first calculate each target's error over 24 test months and then
+average the 24 entry/exit targets equally. See the generated station report for
+RMSE, R², and individual stations.
+
+Run the history and leakage checks with:
+
+```bash
+uv run --no-project python -m unittest test_station_history
+```
+
+Historical v1 outputs have been removed from this branch. They remain available
+in Git history and on `feature/experiment-v1`.
+
+## Official calendar data (historical experiment)
+
+### Audit of 2008–2011 and annual totals
+
+The monthly file counts **only runs of at least three consecutive days off**
+on the DGPA government-office calendar. The [2008 DGPA announcement](https://www.dgpa.gov.tw/information?pid=1395&uid=2)
+lists exactly three: February 6–11 (6 days), April 4–6 (3), and October 10–12
+(3). For 2009, the [original DGPA announcement](https://www.dgpa.gov.tw/information?pid=1353&uid=82)
+lists January 24–February 1 (9) and May 28–31 (4); a
+[later DGPA notice](https://www.dgpa.gov.tw/information?pid=2274&uid=82)
+confirms January 1–4 (4) was also a break. Thus January 2009 has
+`started=13` (4 + 9) and `ended=4`; February has `ended=9`.
+
+The XLS special-observance fill previously marked May 1, 2010, May 1, 2011,
+and September 3, 2011 as working days even though they were weekends. This is
+fixed in `data/official_holiday_days.csv`. They do not form or extend any
+three-day break, so `data/official_long_holiday_periods.csv` and the monthly
+holiday-duration features are unchanged. The parser now checks **every year's
+day-off total** against DGPA's
+[annual totals table](https://www.dgpa.gov.tw/FileConversion?filename=dgpa%2Ffiles%2F202506%2Fcbc12c92-ad33-4bf2-a96e-c5d36fbd23fa.doc&name=%E5%85%A8%E5%B9%B4%E6%94%BE%E5%81%87%E6%97%A5%E6%95%B8%E4%B8%80%E8%A6%BD%E8%A1%A8.doc&nfix=pdf).
+The corrected 2010/2011 totals are 112/115 days. `test_official_calendar.py`
+also verifies daily coverage, every maximal three-day break, and the 2008/2009
+date lists. The existing model predictions are unaffected by this daily-only
+correction.
+
+### Calendar correction
+
+The 2007 XLS parser previously reversed the fills for adjusted days off (51)
+and makeup workdays (43). These are now corrected against the legend and
+footnotes in the [official 2007 calendar](https://www.dgpa.gov.tw/information?pid=4970&uid=30).
+All 2007–2016 XLS legends are now checked during parsing. The corrected 2007
+breaks ending that year are December 30, 2006–January 1 (3 days), February
+17–25 (9), April 5–8 (4), June 16–19 (4), and September 22–25 (4).
+
+The daily calendar, break intervals, and `data/processed_calendar` have been
+rebuilt. Only eight daily classifications and the two holiday-duration
+features for February, April, June, and September 2007 changed. All 112 break
+intervals and 234 monthly aggregates were verified against daily records.
+Original `data/processed` and `lasso.py` are retained for reference. The v2
+default models use the original holiday count and are unaffected by this
+calendar correction.
+
+The original `lasso.py` reads `data/processed/merged_monthly.csv`; it is not
+part of the v2 workflow.
+
+The new `build_official_holidays.py` downloads government office calendars from
+[DGPA historical work calendars](https://www.dgpa.gov.tw/informationlist?uid=30)
+(2007–2016 XLS, plus December 30–31, 2006 for the first cross-year break) and the [government open-data calendar](https://data.gov.tw/dataset/14718)
+(2017–2026 CSV). It saves daily office day-off flags in
+`data/official_holiday_days.csv` and periods of at least three consecutive days
+off in `data/official_long_holiday_periods.csv`. Weekend make-up workdays are
+treated as workdays. The XLS parser uses the official files' cell formatting;
+when refreshing those files, inspect any changes to their styles.
+
+```bash
+uv pip install -r requirements.txt
+uv run --no-project python build_official_holidays.py
+uv run --no-project python preprocessing.py --output-dir data/processed_calendar
+```
+
+`preprocessing.py` retains `long_holiday_count` from the original CSV and adds:
+
+| Column | Meaning |
+| --- | --- |
+| `long_holiday_days_started` | Full duration of every qualifying break that starts in the month, summed. |
+| `long_holiday_days_ended` | Full duration of every qualifying break that ends in the month, summed. |
+
+For a December 30–January 2 break, `started` adds 4 to December, `ended` adds
+4 to January. The static and rolling holiday experiments use these two columns; the
+default static/rolling experiments use the original holiday count.
+
+`long_holiday_days_in_month` and its missingness indicator were removed from
+the exported datasets, dictionary, and preprocessing metadata in experiment v2.
+Rebuilding the data now produces only the two duration columns above. The
+better two-column results also exclude the old holiday count, so that comparison
+does not isolate the effect of removing `in_month` alone.
+
+The office calendar is a proxy for passenger holidays, not the holiday schedule
+of every traveler. The test is retrospective: calendar revisions announced after
+July 2024 may appear in the held-out period's features. A strict forecast made
+in July 2024 would need the calendar version known then.
