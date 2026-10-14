@@ -12,7 +12,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from model_data import load_model_data, make_time_series_cv
 
-OUT = Path(__file__).resolve().parent / "results" / "ols_static_lag"
+OUT = Path(__file__).resolve().parent / "results" / "ols_static_lag_folds"
 LAGS = (1, 3, 12)
 MIN_FOLD_TRAIN_SAMPLES = 24
 # Operational dates supplied by the team; all other stations use the first available record.
