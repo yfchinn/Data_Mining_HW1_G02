@@ -58,6 +58,61 @@ Repeat `git add` for additional files before committing. The final pull includes
 
 ## Experiment v2: train on operating history
 
+### Quick reproduction
+
+From the repository root, use the committed processed data and run the scripts
+in this order. Install [uv](https://docs.astral.sh/uv/) first. The `test` line
+creates `.venv` only if it does not exist.
+
+```bash
+git switch experiment-v2
+git pull --ff-only origin experiment-v2
+test -d .venv || uv venv
+uv pip install -r requirements.txt
+
+uv run --no-project python OLS_static_lag.py
+uv run --no-project python lasso_static_lag.py
+uv run --no-project python OLS_rolling.py
+uv run --no-project python lasso_rolling.py
+uv run --no-project python static_holiday_experiment.py
+uv run --no-project python summarize_station_results.py
+```
+
+The first four scripts fit the v2 baseline models. The fifth fits both holiday
+variants for static and rolling OLS/Lasso. The last combines their station-level
+test metrics with the previous-year-same-month (`t-12`) reference. Read
+`results/experiment_v2/station_method_report.md` for the comparison;
+`station_method_summary.csv` contains the equal-weight average across 24
+targets, and `station_method_comparison.csv` contains every target's metrics.
+The test period is July 2024–June 2026 (24 months). No calendar rebuild is
+needed because both processed input files are committed.
+
+### Targets and features
+
+Each model predicts the monthly `hsr_entry_*` or `hsr_exit_*` count for one of
+12 stations, giving 24 separate targets. All variants share these **nine**
+features:
+
+| Group | Exact feature columns | Meaning |
+| --- | --- | --- |
+| Calendar (4) | `month_index`, `month_sin`, `month_cos`, `days_in_month` | Time trend, annual cycle, and month length. `month_index` is calculated from `date`. |
+| Target history (5) | `lag_1`, `lag_3`, `lag_12`, `rolling_mean_3`, `rolling_mean_12` | The target station/direction's observed counts 1, 3, and 12 months earlier; means of the preceding 3 and 12 months. |
+
+| Variant | Additional feature columns | Total | Input data |
+| --- | --- | ---: | --- |
+| Baseline (four model scripts) | `long_holiday_count` | 10 | `data/processed/merged_monthly.csv` |
+| Holiday `raw` | `long_holiday_days_started`, `long_holiday_days_ended` | 11 | `data/processed_calendar/merged_monthly.csv` |
+| Holiday `raw_log1p` | The two `raw` columns **plus** `long_holiday_days_started_log1p`, `long_holiday_days_ended_log1p` | 13 | `data/processed_calendar/merged_monthly.csv` |
+
+`raw` and `raw_log1p` exclude `long_holiday_count`. The `t-12` reference uses
+only the same station/direction's observed count from the previous year's
+month; it is not a fitted regression model. Lag and rolling features use only
+observations before the forecast month, including previously observed test
+months in this one-month-ahead evaluation. See `station_history.py` for
+opening-date masking.
+
+### Validation and results
+
 On branch `experiment-v2`, `OLS_static_lag.py`, `OLS_rolling.py`,
 `lasso_static_lag.py`, and `lasso_rolling.py` share the operating-history rules
 in `station_history.py`. Run these same scripts to write **new** outputs under
@@ -147,23 +202,6 @@ station's previous-year-same-month forecast.
 These values first calculate each target's error over 24 test months and then
 average the 24 entry/exit targets equally. See the generated station report for
 RMSE, R², and individual stations.
-
-To rebuild the v2 outputs from the committed processed data, run from the
-repository root:
-
-```bash
-uv pip install -r requirements.txt
-uv run --no-project python OLS_static_lag.py
-uv run --no-project python lasso_static_lag.py
-uv run --no-project python OLS_rolling.py
-uv run --no-project python lasso_rolling.py
-uv run --no-project python static_holiday_experiment.py
-uv run --no-project python summarize_station_results.py
-```
-
-The model scripts write station predictions and metrics. The final script
-creates the equal-weight station comparison and t-12 reference. It does not
-need the discarded whole-network output files.
 
 Run the history and leakage checks with:
 
