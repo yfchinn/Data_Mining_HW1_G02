@@ -1,0 +1,64 @@
+{
+  "source": "Uploaded ZIP Data_Mining_HW1_G02-main, experiment_v2",
+  "reference_model": "rolling Lasso, holiday raw (H), per-target alpha, 36 month window",
+  "train_window_for_coefficients": "2023-06 through 2026-05, 36 observations per target",
+  "test_period": "2024-07 through 2026-06, 24 months x 24 targets",
+  "test_MAE_equal_target_weight": 28276.37562176074,
+  "test_MAPE_equal_target_weight": 5.418784222470909,
+  "test_MAE_B": 28454.582404782184,
+  "mean_gap_BminusH": 178.20678302145265,
+  "relative_MAE_gain_pct": 0.6262850056499247,
+  "paired_month_block_bootstrap": {
+    "3": {
+      "observed_passengers": 178.20678302145265,
+      "percentile_95_CI_passengers": [
+        -42.017486057761396,
+        421.68542469502154
+      ],
+      "Pr_gap_positive_bootstrap": 0.93795
+    },
+    "6": {
+      "observed_passengers": 178.20678302145265,
+      "percentile_95_CI_passengers": [
+        3.9909638746045997,
+        354.97671920094626
+      ],
+      "Pr_gap_positive_bootstrap": 0.9785
+    },
+    "12": {
+      "observed_passengers": 178.20678302145265,
+      "percentile_95_CI_passengers": [
+        81.65189569689075,
+        274.7616703460146
+      ],
+      "Pr_gap_positive_bootstrap": 1.0
+    }
+  },
+  "month_2025_10_mean_signed_error": 56553.41466362571,
+  "month_fixed_effect_R2_on_signed_percentage_errors_descriptive": 0.6074551024677678,
+  "month_2025_10_n_positive": 24,
+  "month_2026_03_n_positive": 24,
+  "month_2024_10_n_positive": 2,
+  "feature_selection_over_all_month_target_models": {
+    "rolling_mean_12": 0.5972222222222222,
+    "month_index": 0.5833333333333334,
+    "days_in_month": 0.546875,
+    "lag_1": 0.5434027777777778,
+    "lag_12": 0.5069444444444444,
+    "month_cos": 0.4652777777777778,
+    "long_holiday_days_started": 0.3472222222222222,
+    "lag_3": 0.3246527777777778,
+    "month_sin": 0.2916666666666667,
+    "long_holiday_days_ended": 0.24479166666666666,
+    "rolling_mean_3": 0.09375
+  },
+  "lastfit_models_reproduced": 24,
+  "max_reproduction_pred_error": 1.1641532182693481e-10,
+  "max_reproduction_coefficient_error": 1.8189894035458565e-11,
+  "n_targets": 24,
+  "n_months": 24,
+  "B_residual_block_Lasso_sensitivity": 999,
+  "bootstrap_residual_block_length": 6,
+  "Lasso_coefficients_are_not_OLS_inference": true,
+  "no_test_time_hyperparameter_selection": true
+}

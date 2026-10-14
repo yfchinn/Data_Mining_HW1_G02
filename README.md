@@ -293,3 +293,37 @@ The office calendar is a proxy for passenger holidays, not the holiday schedule
 of every traveler. The test is retrospective: calendar revisions announced after
 July 2024 may appear in the held-out period's features. A strict forecast made
 in July 2024 would need the calendar version known then.
+
+## Additional statistical significance and error analysis (Section 8)
+
+The reproducible analysis code lives in [`analysis/section8/`](analysis/section8/). It uses the *already-generated* `results/experiment_v2/` outputs and the existing processed input data, without changing the baseline training scripts, frozen forecasts, or hyperparameter selection.
+
+### Run locally (macOS/Linux)
+
+From the repository root, create a Python environment and install the dependencies:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r analysis/section8/requirements-analysis.txt
+```
+
+Then run the analyses **in this order**:
+
+```bash
+cd analysis/section8
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python analyze_section8.py
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python lasso_null_tests.py
+```
+
+On Windows PowerShell, activate the environment with `.venv\Scripts\Activate.ps1` and run `python analyze_section8.py` and `python lasso_null_tests.py` without the Unix-style thread environment prefixes.
+
+| Script | Purpose | Generated outputs |
+| --- | --- | --- |
+| `analyze_section8.py` | Reproduce/audit the final 24 rolling-Lasso forecasts; compute standardized coefficients, VIF, exploratory bootstrap and auxiliary OLS/HAC statistics; analyze test residuals, feature selection, worst cases, and paired forecast differences. | `analysis_results.json`, `data/*.csv`, `figures/*.png` |
+| `lasso_null_tests.py` | Additional *exploratory* 1,999-draws-per-feature restricted-null bootstrap for the Taipei-entry model. Run **after** the main script. | `data/taipei_lasso_conditional_null_bootstrap_pvalues.csv`, `data/taipei_entry_complete_beta_CI_p_VIF.csv` |
+
+The existing CSV/PNG outputs are versioned for convenience. Rerunning these scripts recalculates the analyses from the repository's experiment files; it does **not** refit the entire original forecasting benchmark. The null-bootstrap step can take considerably longer than the main analysis.
+
+**Statistical interpretation:** the holiday-feature comparison is exploratory because the reported variant was not prospectively selected on an independent test set. Lasso resampling intervals and restricted-null p-values are not formal post-selection inference; OLS/HAC tests use a separate auxiliary estimator. Multiple stations and dates are dependent, and model coefficients are predictive rather than causal.

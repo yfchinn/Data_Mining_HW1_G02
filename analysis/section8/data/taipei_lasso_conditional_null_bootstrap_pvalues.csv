@@ -1,0 +1,12 @@
+target,feature,observed_lasso_beta_per_feature_SD,approx_null_bootstrap_two_sided_p,null_test_reps,block_len
+hsr_entry_taipei,month_index,19005.038631557833,0.077,1999,6
+hsr_entry_taipei,month_sin,-0.0,1.0,1999,6
+hsr_entry_taipei,month_cos,0.0,1.0,1999,6
+hsr_entry_taipei,days_in_month,24286.989187269246,0.0535,1999,6
+hsr_entry_taipei,long_holiday_days_started,-0.0,1.0,1999,6
+hsr_entry_taipei,long_holiday_days_ended,-0.0,1.0,1999,6
+hsr_entry_taipei,lag_1,-0.0,1.0,1999,6
+hsr_entry_taipei,lag_3,847.098314907717,0.0925,1999,6
+hsr_entry_taipei,lag_12,25410.540837851273,0.0935,1999,6
+hsr_entry_taipei,rolling_mean_3,0.0,1.0,1999,6
+hsr_entry_taipei,rolling_mean_12,0.0,1.0,1999,6
