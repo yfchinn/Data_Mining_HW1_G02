@@ -1,0 +1,7 @@
+# Python-only release: do not track LaTeX/PDF assets or generated caches.
+*.tex
+*.pdf
+build_tex.py
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

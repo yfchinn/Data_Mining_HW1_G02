@@ -293,3 +293,59 @@ The office calendar is a proxy for passenger holidays, not the holiday schedule
 of every traveler. The test is retrospective: calendar revisions announced after
 July 2024 may appear in the held-out period's features. A strict forecast made
 in July 2024 would need the calendar version known then.
+
+## Additional statistical significance and error analysis (Section 8)
+
+The Section 8 reproducibility code, statistical results, error analysis, and
+GitHub-readable tables are documented in the
+[Section 8 analysis README](analysis/section8/README.md). This analysis reads
+existing `results/experiment_v2/` outputs and processed datasets; it **does not
+change or retune the original forecasting experiments**.
+
+### Run locally (macOS/Linux)
+
+From the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -r analysis/section8/requirements-analysis.txt
+cd analysis/section8
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python analyze_section8.py
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python lasso_null_tests.py
+python export_tables_md.py
+```
+
+**Order matters:** the first script regenerates model audits, coefficients,
+uncertainty diagnostics, residual analyses, CSV outputs, and PNG plots; the
+second adds exploratory restricted-null Lasso p-values for the Taipei-entry
+model; the third formats the existing CSV/JSON results as Markdown tables.
+`export_tables_md.py` **does not rerun any statistical calculation**. The
+second script uses 1,999 bootstrap draws per feature and can be slow. If you
+only wish to refresh Markdown tables from the existing committed CSVs, run
+`python analysis/section8/export_tables_md.py` from the repository root.
+
+On Windows PowerShell, activate with `.venv\Scripts\Activate.ps1`, then run
+the three Python scripts from `analysis/section8/` without the Unix environment
+variable prefixes.
+
+### Browse the Section 8 results
+
+| Results | Where to find them |
+| --- | --- |
+| Main statistical, model comparison, and error tables | [TABLES.md](analysis/section8/TABLES.md) |
+| All **24 targets × 11 predictors**: Lasso, auxiliary OLS/HAC, intervals, and VIF | [ALL_24_TARGETS_TABLES.md](analysis/section8/ALL_24_TARGETS_TABLES.md) |
+| Full worst-error rankings, residual diagnostics, and reproducibility checks | [SUPPLEMENTAL_TABLES.md](analysis/section8/SUPPLEMENTAL_TABLES.md) |
+| Exact numerical results | [`analysis/section8/data/`](analysis/section8/data/) |
+| PNG plots (residual bias, feature selection, coefficient sensitivity) | [`analysis/section8/figures/`](analysis/section8/figures/) |
+| Model comparison summary and analysis configuration | [analysis_results.json](analysis/section8/analysis_results.json) |
+| Methods, file-by-file results index, and inference limitations | [Section 8 README](analysis/section8/README.md) |
+
+**Scope:** These are analyses of the existing rolling Lasso holiday-duration
+(H) forecasts (24 station/direction targets, 24 test months, July 2024–June
+2026), with an exploratory comparison to baseline rolling Lasso (B). Lasso
+bootstrap intervals and approximate restricted-null p-values are exploratory;
+OLS/Newey–West HAC inferential tests concern a different, auxiliary estimator.
+Do not treat correlated station/month outcomes as independent or interpret
+predictive coefficients as causal effects.
