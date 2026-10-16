@@ -9,10 +9,6 @@
    - 實證顯示：全歷史數據下 3 月與 9 月 YoY 相關係數為 r = 0.49；若排除 2020-2022 疫情極端扭曲年份，
      r 上升至 0.96 (對照組 8 月與 9 月為 r = 0.98)，證實特定連假月份間具備強烈跨期 Lag-12 連動性。
 
-3. 驗證研究問題 RQ2 - 所得效果與運具轉移 (Module 3 - Modal Shift Analysis $H_2$):
-   - 每人名目 GDP 與「高鐵 / 公路客運搭乘比值 (HSR-to-Bus Ratio)」呈現 r = 0.9244 的強烈正相關。
-   - 證實國民所得提升使得民眾顯著由客運轉移至高鐵 (Modal Shift)。
-
 4. 特徵重要性評估 (Module 4 - Random Forest Feature Importance):
    - 於訓練集上評估 Top 15 特徵排行榜，大眾運輸供給端指標 (路線公里數、營運日數) 與 GDP 具備最高預測力。
 
@@ -72,47 +68,59 @@ os.makedirs(FIG_DIR, exist_ok=True)
 # ==============================================================================
 # 1. 資料載入與防洩漏過濾 (Data Preparation & Leakage Filtering)
 # ==============================================================================
-def load_and_prepare_data(csv_path="data/processed/merged_monthly.csv", test_months=24):
+def load_and_prepare_data(csv_path="data/processed_calendar/merged_monthly.csv", test_months=24):
     """
-    載入前處理後的 CSV，並嚴格劃分訓練集 (Train) 與測試集 (Test)。
-    預設保留最後 24 個月作為 Test set，特徵分析僅使用 Train set。
+    載入前處理後的 CSV，動態計算高鐵自身的 5 大 Lag 特徵，並切分 Train/Test。
     """
     if not os.path.exists(csv_path):
-        # 備用路徑 (若執行目錄在根目錄)
         if os.path.exists("merged_monthly.csv"):
             csv_path = "merged_monthly.csv"
             
     df = pd.read_csv(csv_path, parse_dates=["date"])
     df = df.sort_values("date").set_index("date")
     
-    train_df = df.iloc[:-test_months].copy()
-    test_df = df.iloc[-test_months:].copy()
+    # 💡 核心填補：動態計算高鐵總運量 (hsr_passengers) 的 5 大 Lag 特徵
+    target_col = 'hsr_passengers'
+    df['lag_1'] = df[target_col].shift(1)
+    df['lag_3'] = df[target_col].shift(3)
+    df['lag_12'] = df[target_col].shift(12)
+    df['rolling_mean_3'] = df[target_col].shift(1).rolling(3).mean()
+    df['rolling_mean_12'] = df[target_col].shift(1).rolling(12).mean()
     
-    print(f"✅ 資料載入成功！總筆數: {len(df)} 個月 | 訓練集: {len(train_df)} 個月 | 測試集: {len(test_df)} 個月")
-    return df, train_df, test_df
+    # 前 12 個月會因為位移產生 NaN，刪除缺值列以維護訓練集品質
+    df_clean = df.dropna(subset=['lag_12', 'rolling_mean_12']).copy()
+    
+    train_df = df_clean.iloc[:-test_months].copy()
+    test_df = df_clean.iloc[-test_months:].copy()
+    
+    print(f"✅ 資料載入與 Lag 特徵建立成功！總筆數: {len(df_clean)} 個月 | 訓練集: {len(train_df)} 個月 | 測試集: {len(test_df)} 個月")
+    return df_clean, train_df, test_df
 
 
 def get_candidate_features(df):
     """
     【防漏與防重複過濾】
-    1. 排除當月高鐵/公車結果變數 (Leakage)。
-    2. 排除 bus_total_* 欄位 (因為 bus_total = bus_city + bus_highway，防止 A = B + C 恆等式導致 VIF 暴衝)。
+    1. 包含 5 大 Target History Lag 特徵。
+    2. 排除當月高鐵/公車結果變數 (Leakage)。
+    3. 排除 bus_total_* 欄位 (防止 A = B + C 恆等式導致 VIF 暴衝)。
     """
+    target_lags = ['lag_1', 'lag_3', 'lag_12', 'rolling_mean_3', 'rolling_mean_12']
+    
     leakage_cols = {
         'date', 'month_sin', 'month_cos', 'days_in_month', 'hsr_passengers',
         'hsr_daily_passengers', 'hsr_passenger_km', 'hsr_avg_trip_km',
         'hsr_occupancy_pct', 'hsr_punctuality_pct', 'hsr_trips', 'hsr_train_km'
     }
     
-    candidates = []
+    candidates = list(target_lags)  # 先加入 5 大 Lag 特徵
+    
     for col in df.columns:
-        if col.endswith('_is_missing'):
+        if col in target_lags or col.endswith('_is_missing'):
             continue
         if col.startswith('hsr_entry_') or col.startswith('hsr_exit_'):
             continue
         if col.startswith('bus_') and ('revenue' in col or 'passengers' in col or 'vehicle_km' in col):
             continue
-        # 關鍵修正：剔除所有 bus_total_* 欄位 (避免與 city + highway 產生恆等式多重共線性)
         if col.startswith('bus_total_'):
             continue
         if col in leakage_cols:
@@ -121,7 +129,6 @@ def get_candidate_features(df):
         candidates.append(col)
         
     return candidates
-
 
 # ==============================================================================
 # 2. 模組一：多重共線性與 VIF 檢驗 (Correlation & VIF Analysis)
@@ -432,3 +439,4 @@ if __name__ == "__main__":
     feature_ranking = evaluate_feature_importance(train_df, candidate_features)
     
     print(f"\n🎉 特徵分析全部完成！所有圖表均已更新並儲存於 `{FIG_DIR}/` 目錄。")
+
