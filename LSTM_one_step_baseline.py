@@ -28,7 +28,7 @@ def metrics(actual, predicted):
     nonzero = actual != 0
     return dict(MAE=float(mean_absolute_error(actual.ravel(), predicted.ravel())),
                 RMSE=float(np.sqrt(mean_squared_error(actual.ravel(), predicted.ravel()))),
-                R2=float(r2_score(actual.ravel(), predicted.ravel())),
+                R2=float(r2_score(actual, predicted)),
                 MAPE_pct=float(np.mean(np.abs(error[nonzero] / actual[nonzero])) * 100) if nonzero.any() else np.nan,
                 WAPE_pct=float(100 * np.abs(error).sum() / np.abs(actual).sum()) if np.abs(actual).sum() else np.nan)
 
