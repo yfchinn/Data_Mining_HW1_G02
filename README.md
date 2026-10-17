@@ -1,10 +1,5 @@
 # Data_Mining_HW1_G02
 
-## Links
-
-- Document: [Google Docs](https://docs.google.com/document/d/17EDonnW9b7wmKxxSu9W65ORkYWyFXTFzqIjIo54BFNc/edit?usp=sharing)
-- Report: [Overleaf](https://www.overleaf.com/5219884191pcbkyktfpgxp#06cc55)
-
 ## How to Use
 
 ### 1. Download the Repository
